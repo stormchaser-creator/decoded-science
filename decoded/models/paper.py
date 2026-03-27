@@ -21,6 +21,7 @@ class PaperStatus(str, enum.Enum):
     QUEUED = "queued"
     FETCHING = "fetching"
     FETCHED = "fetched"
+    PARSED = "parsed"
     EXTRACTING = "extracting"
     EXTRACTED = "extracted"
     CONNECTING = "connecting"
