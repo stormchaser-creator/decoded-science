@@ -101,9 +101,9 @@ export default function App() {
         </div>
         {stats && (
           <div style={{ display: 'flex', gap: '24px', marginLeft: 'auto', fontSize: '13px', color: '#6b7280' }}>
-            <span><b style={{ color: '#7c6af7' }}>{stats.total_papers?.toLocaleString() || '—'}</b> papers</span>
-            <span><b style={{ color: '#4ade80' }}>{stats.extracted?.toLocaleString() || '—'}</b> extracted</span>
-            <span><b style={{ color: '#fbbf24' }}>{stats.connections?.toLocaleString() || '—'}</b> connections</span>
+            <span><b style={{ color: '#7c6af7' }}>{stats.papers?.total?.toLocaleString() || '—'}</b> papers</span>
+            <span><b style={{ color: '#4ade80' }}>{stats.papers?.by_status?.extracted?.toLocaleString() || '—'}</b> extracted</span>
+            <span><b style={{ color: '#fbbf24' }}>{stats.connections?.total?.toLocaleString() || '—'}</b> connections</span>
           </div>
         )}
       </header>
@@ -151,7 +151,7 @@ export default function App() {
             <>
               <div style={{ ...styles.sectionTitle, marginTop: '24px' }}>Pipeline Stats</div>
               <div style={styles.statsGrid}>
-                {Object.entries(stats.by_status || {}).slice(0, 6).map(([status, n]) => (
+                {Object.entries(stats.papers?.by_status || {}).slice(0, 6).map(([status, n]) => (
                   <div key={status} style={styles.statCard}>
                     <div style={styles.statNum}>{n}</div>
                     <div style={styles.statLabel}>{status}</div>
