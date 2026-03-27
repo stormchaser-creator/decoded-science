@@ -317,13 +317,23 @@ class ExtractionWorker:
 
             store_extraction(conn, result, paper_id)
 
+            # Bridge to Pearl KB — write claims/mechanisms/findings as kb_entries
+            try:
+                from decoded.pearl.bridge import bridge_extraction_to_pearl
+                bridge_stats = bridge_extraction_to_pearl(result, paper, conn)
+                conn.commit()
+            except Exception as bridge_exc:
+                logger.warning("Pearl bridge failed for %s: %s", paper_id[:8], bridge_exc)
+                bridge_stats = {}
+
             logger.info(
-                "Extracted %s: %s (%d entities, %d claims, $%.4f)",
+                "Extracted %s: %s (%d entities, %d claims, $%.4f) | pearl +%d entries",
                 paper_id[:8],
                 title[:60],
                 len(result.entities),
                 len(result.claims),
                 result.cost_usd,
+                bridge_stats.get("total", 0),
             )
             return "extracted"
 

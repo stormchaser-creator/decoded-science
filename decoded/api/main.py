@@ -167,6 +167,14 @@ class WorkspaceUpdate(BaseModel):
     state: Optional[dict] = None
 
 
+class ConnectomeQueryRequest(BaseModel):
+    question: str
+    concept_a: Optional[str] = None
+    concept_b: Optional[str] = None
+    query_type: str = "bridge"  # bridge | neighbors | pathway | text_search
+    max_results: int = 10
+
+
 # ---------------------------------------------------------------------------
 # Health
 # ---------------------------------------------------------------------------
@@ -549,6 +557,45 @@ def bridge_query(request: BridgeRequest):
         "hypothesis": result.get("hypothesis", {}).get("hypothesis") if result.get("hypothesis") else None,
         "cost_usd": result.get("hypothesis", {}).get("cost_usd", 0) if result.get("hypothesis") else 0,
     }
+
+
+# ---------------------------------------------------------------------------
+# Connectome query (Pearl integration)
+# ---------------------------------------------------------------------------
+
+@app.post("/connectome/query")
+def connectome_query(request: ConnectomeQueryRequest):
+    """Query the literature connectome graph — called by Pearl's query_connectome tool."""
+    from decoded.pearl.graph_tool import query_connectome
+    result = query_connectome(
+        question=request.question,
+        concept_a=request.concept_a,
+        concept_b=request.concept_b,
+        query_type=request.query_type,
+        max_results=min(request.max_results, 20),
+    )
+    return result
+
+
+@app.get("/connectome/stats")
+def connectome_pearl_stats():
+    """Stats on what's been bridged to Pearl's KB from Decoded."""
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute(
+        """
+        SELECT entry_type, operation, density, count(*) as n
+        FROM kb_entries
+        WHERE workstation = 'decoded_connectome'
+        GROUP BY entry_type, operation, density
+        ORDER BY n DESC
+        """
+    )
+    rows = [dict(r) for r in cur.fetchall()]
+    cur.execute("SELECT count(*) as n FROM kb_entries WHERE workstation = 'decoded_connectome'")
+    total = cur.fetchone()["n"]
+    conn.close()
+    return {"total_entries": total, "breakdown": rows}
 
 
 # ---------------------------------------------------------------------------
