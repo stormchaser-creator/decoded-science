@@ -24,7 +24,7 @@ import psycopg2.extras
 from dotenv import load_dotenv
 
 _ROOT = Path(__file__).resolve().parent.parent.parent
-load_dotenv(_ROOT / ".env", override=False)
+load_dotenv(_ROOT / ".env", override=True)
 
 from decoded.cost_tracker import CostTracker, CostBudget
 from decoded.extract.extractor import PaperExtractor, DEFAULT_MODEL
