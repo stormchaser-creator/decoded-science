@@ -1,0 +1,19 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "decoded-explorer",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "cwd": "/Users/whit/Projects/Decoded/explorer",
+      "port": 5173
+    },
+    {
+      "name": "decoded-api",
+      "runtimeExecutable": "/Users/whit/Projects/Decoded/.venv/bin/uvicorn",
+      "runtimeArgs": ["decoded.api.main:app", "--host", "0.0.0.0", "--port", "8000"],
+      "cwd": "/Users/whit/Projects/Decoded",
+      "port": 8000
+    }
+  ]
+}
