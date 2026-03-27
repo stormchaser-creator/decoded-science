@@ -41,3 +41,6 @@ data/*.parquet
 # Logs
 *.log
 logs/
+explorer/node_modules/
+explorer/dist/
+logs/
