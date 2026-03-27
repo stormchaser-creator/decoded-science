@@ -13,6 +13,25 @@ Endpoints:
   POST /bridge                  — on-demand bridge query between two concepts
   GET  /stats                   — pipeline statistics
   GET  /health                  — health check
+
+Auth & Workspace Endpoints:
+  POST /auth/register           — create account
+  POST /auth/login              — login, returns JWT
+  GET  /auth/profile            — current user profile (requires JWT)
+  GET  /workspace/searches      — list saved searches
+  POST /workspace/searches      — save a search
+  DELETE /workspace/searches/{id} — delete saved search
+  GET  /workspace/collections   — list collections
+  POST /workspace/collections   — create collection
+  POST /workspace/collections/{id}/papers — add paper to collection
+  DELETE /workspace/collections/{id}/papers/{paper_id} — remove paper
+  GET  /workspace/collections/{id}/export — export BibTeX or CSV
+  GET  /workspace/watchlists    — list watchlists
+  POST /workspace/watchlists    — create watchlist
+  DELETE /workspace/watchlists/{id} — delete watchlist
+  GET  /workspace/workspaces    — list workspaces
+  POST /workspace/workspaces    — create workspace
+  PUT  /workspace/workspaces/{id} — update workspace state
 """
 
 from __future__ import annotations
@@ -26,9 +45,12 @@ from typing import Any
 import psycopg2
 import psycopg2.extras
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Query, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Query, BackgroundTasks, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
+from typing import Optional
+
+from decoded.api.auth import hash_password, verify_password, create_access_token, decode_token
 
 _ROOT = Path(__file__).resolve().parent.parent.parent
 load_dotenv(_ROOT / ".env", override=False)
@@ -94,6 +116,55 @@ class BridgeRequest(BaseModel):
     concept_a: str
     concept_b: str
     max_hops: int = 4
+
+
+# Auth models
+class RegisterRequest(BaseModel):
+    email: str
+    name: str
+    password: str
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+# Workspace models
+class SavedSearchCreate(BaseModel):
+    name: str
+    query: str
+    filters: dict = {}
+
+
+class CollectionCreate(BaseModel):
+    name: str
+    description: Optional[str] = None
+    is_public: bool = False
+
+
+class AddPaperRequest(BaseModel):
+    paper_id: str
+    notes: Optional[str] = None
+
+
+class WatchlistCreate(BaseModel):
+    name: str
+    watch_type: str  # entity | query | author
+    watch_value: str
+
+
+class WorkspaceCreate(BaseModel):
+    name: str
+    description: Optional[str] = None
+    state: dict = {}
+    is_default: bool = False
+
+
+class WorkspaceUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    state: Optional[dict] = None
 
 
 # ---------------------------------------------------------------------------
@@ -478,6 +549,385 @@ def bridge_query(request: BridgeRequest):
         "hypothesis": result.get("hypothesis", {}).get("hypothesis") if result.get("hypothesis") else None,
         "cost_usd": result.get("hypothesis", {}).get("cost_usd", 0) if result.get("hypothesis") else 0,
     }
+
+
+# ---------------------------------------------------------------------------
+# Auth helpers
+# ---------------------------------------------------------------------------
+
+def get_current_user(authorization: Optional[str] = Header(None)) -> dict:
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
+    token = authorization.split(" ", 1)[1]
+    payload = decode_token(token)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    return payload
+
+
+# ---------------------------------------------------------------------------
+# Auth endpoints
+# ---------------------------------------------------------------------------
+
+@app.post("/auth/register", status_code=201)
+def register(request: RegisterRequest):
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT id FROM decoded_users WHERE email = %s", (request.email,))
+    if cur.fetchone():
+        conn.close()
+        raise HTTPException(status_code=409, detail="Email already registered")
+    pw_hash = hash_password(request.password)
+    cur.execute(
+        "INSERT INTO decoded_users (email, name, password_hash) VALUES (%s, %s, %s) RETURNING id, email, name, role, created_at",
+        (request.email, request.name, pw_hash),
+    )
+    user = dict(cur.fetchone())
+    conn.commit()
+    conn.close()
+    user["created_at"] = user["created_at"].isoformat() if user.get("created_at") else None
+    token = create_access_token(str(user["id"]), user["email"])
+    return {"user": user, "token": token}
+
+
+@app.post("/auth/login")
+def login(request: LoginRequest):
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT id, email, name, role, password_hash FROM decoded_users WHERE email = %s", (request.email,))
+    row = cur.fetchone()
+    conn.close()
+    if not row or not verify_password(request.password, row["password_hash"]):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    user = {k: v for k, v in row.items() if k != "password_hash"}
+    token = create_access_token(str(user["id"]), user["email"])
+    return {"user": user, "token": token}
+
+
+@app.get("/auth/profile")
+def profile(current_user: dict = Depends(get_current_user)):
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute(
+        "SELECT id, email, name, role, created_at FROM decoded_users WHERE id = %s",
+        (current_user["sub"],),
+    )
+    row = cur.fetchone()
+    conn.close()
+    if not row:
+        raise HTTPException(status_code=404, detail="User not found")
+    user = dict(row)
+    user["created_at"] = user["created_at"].isoformat() if user.get("created_at") else None
+    return user
+
+
+# ---------------------------------------------------------------------------
+# Saved searches
+# ---------------------------------------------------------------------------
+
+@app.get("/workspace/searches")
+def list_searches(current_user: dict = Depends(get_current_user)):
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute(
+        "SELECT id, name, query, filters, result_count, last_run_at, created_at FROM saved_searches WHERE user_id = %s ORDER BY created_at DESC",
+        (current_user["sub"],),
+    )
+    rows = [_jsonify_row(dict(r)) for r in cur.fetchall()]
+    conn.close()
+    return {"searches": rows}
+
+
+@app.post("/workspace/searches", status_code=201)
+def create_search(request: SavedSearchCreate, current_user: dict = Depends(get_current_user)):
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute(
+        "INSERT INTO saved_searches (user_id, name, query, filters) VALUES (%s, %s, %s, %s) RETURNING id, name, query, filters, created_at",
+        (current_user["sub"], request.name, request.query, json.dumps(request.filters)),
+    )
+    row = _jsonify_row(dict(cur.fetchone()))
+    conn.commit()
+    conn.close()
+    return row
+
+
+@app.delete("/workspace/searches/{search_id}", status_code=204)
+def delete_search(search_id: str, current_user: dict = Depends(get_current_user)):
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        "DELETE FROM saved_searches WHERE id = %s AND user_id = %s",
+        (search_id, current_user["sub"]),
+    )
+    conn.commit()
+    conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Collections
+# ---------------------------------------------------------------------------
+
+@app.get("/workspace/collections")
+def list_collections(current_user: dict = Depends(get_current_user)):
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute(
+        """
+        SELECT c.id, c.name, c.description, c.is_public, c.created_at,
+               COUNT(cp.paper_id) as paper_count
+        FROM decoded_collections c
+        LEFT JOIN collection_papers cp ON cp.collection_id = c.id
+        WHERE c.user_id = %s
+        GROUP BY c.id, c.name, c.description, c.is_public, c.created_at
+        ORDER BY c.created_at DESC
+        """,
+        (current_user["sub"],),
+    )
+    rows = [_jsonify_row(dict(r)) for r in cur.fetchall()]
+    conn.close()
+    return {"collections": rows}
+
+
+@app.post("/workspace/collections", status_code=201)
+def create_collection(request: CollectionCreate, current_user: dict = Depends(get_current_user)):
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute(
+        "INSERT INTO decoded_collections (user_id, name, description, is_public) VALUES (%s, %s, %s, %s) RETURNING id, name, description, is_public, created_at",
+        (current_user["sub"], request.name, request.description, request.is_public),
+    )
+    row = _jsonify_row(dict(cur.fetchone()))
+    conn.commit()
+    conn.close()
+    return row
+
+
+@app.post("/workspace/collections/{collection_id}/papers", status_code=201)
+def add_paper_to_collection(
+    collection_id: str,
+    request: AddPaperRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    # Verify collection ownership
+    cur.execute("SELECT id FROM decoded_collections WHERE id = %s AND user_id = %s", (collection_id, current_user["sub"]))
+    if not cur.fetchone():
+        conn.close()
+        raise HTTPException(status_code=404, detail="Collection not found")
+    cur.execute(
+        "INSERT INTO collection_papers (collection_id, paper_id, notes) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
+        (collection_id, request.paper_id, request.notes),
+    )
+    conn.commit()
+    conn.close()
+    return {"status": "added"}
+
+
+@app.delete("/workspace/collections/{collection_id}/papers/{paper_id}", status_code=204)
+def remove_paper_from_collection(
+    collection_id: str,
+    paper_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        "DELETE FROM collection_papers WHERE collection_id = %s AND paper_id = %s",
+        (collection_id, paper_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+@app.get("/workspace/collections/{collection_id}/export")
+def export_collection(
+    collection_id: str,
+    format: str = Query("bibtex", enum=["bibtex", "csv"]),
+    current_user: dict = Depends(get_current_user),
+):
+    """Export a collection as BibTeX or CSV."""
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute(
+        """
+        SELECT p.id, p.title, p.authors, p.journal, p.published_date, p.doi,
+               p.pmc_id, p.abstract
+        FROM collection_papers cp
+        JOIN raw_papers p ON p.id = cp.paper_id
+        JOIN decoded_collections c ON c.id = cp.collection_id
+        WHERE cp.collection_id = %s AND c.user_id = %s
+        ORDER BY p.published_date DESC NULLS LAST
+        """,
+        (collection_id, current_user["sub"]),
+    )
+    papers = [_jsonify_row(dict(r)) for r in cur.fetchall()]
+    conn.close()
+
+    if format == "bibtex":
+        lines = []
+        for p in papers:
+            authors = p.get("authors", [])
+            if isinstance(authors, list):
+                author_str = " and ".join(
+                    a.get("name", a) if isinstance(a, dict) else str(a)
+                    for a in authors
+                )
+            else:
+                author_str = str(authors)
+            doi = p.get("doi", "")
+            key = (doi.replace("/", "_").replace(".", "_") if doi else str(p["id"])[:8])
+            year = ""
+            if p.get("published_date"):
+                year = str(p["published_date"])[:4]
+            lines.append(f"@article{{{key},")
+            lines.append(f'  title = {{{p.get("title", "")}}},')
+            lines.append(f"  author = {{{author_str}}},")
+            lines.append(f'  journal = {{{p.get("journal", "")}}},')
+            lines.append(f"  year = {{{year}}},")
+            if doi:
+                lines.append(f"  doi = {{{doi}}},")
+            lines.append("}")
+            lines.append("")
+        return {"format": "bibtex", "content": "\n".join(lines), "count": len(papers)}
+
+    else:  # csv
+        import csv
+        import io
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow(["title", "authors", "journal", "year", "doi", "abstract"])
+        for p in papers:
+            authors = p.get("authors", [])
+            if isinstance(authors, list):
+                author_str = "; ".join(
+                    a.get("name", a) if isinstance(a, dict) else str(a)
+                    for a in authors
+                )
+            else:
+                author_str = str(authors)
+            year = str(p.get("published_date", ""))[:4] if p.get("published_date") else ""
+            writer.writerow([
+                p.get("title", ""),
+                author_str,
+                p.get("journal", ""),
+                year,
+                p.get("doi", ""),
+                (p.get("abstract", "") or "")[:200],
+            ])
+        return {"format": "csv", "content": buf.getvalue(), "count": len(papers)}
+
+
+# ---------------------------------------------------------------------------
+# Watchlists
+# ---------------------------------------------------------------------------
+
+@app.get("/workspace/watchlists")
+def list_watchlists(current_user: dict = Depends(get_current_user)):
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute(
+        "SELECT id, name, watch_type, watch_value, last_checked_at, new_count, created_at FROM watchlists WHERE user_id = %s ORDER BY created_at DESC",
+        (current_user["sub"],),
+    )
+    rows = [_jsonify_row(dict(r)) for r in cur.fetchall()]
+    conn.close()
+    return {"watchlists": rows}
+
+
+@app.post("/workspace/watchlists", status_code=201)
+def create_watchlist(request: WatchlistCreate, current_user: dict = Depends(get_current_user)):
+    if request.watch_type not in ("entity", "query", "author"):
+        raise HTTPException(status_code=400, detail="watch_type must be entity, query, or author")
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute(
+        "INSERT INTO watchlists (user_id, name, watch_type, watch_value) VALUES (%s, %s, %s, %s) RETURNING id, name, watch_type, watch_value, created_at",
+        (current_user["sub"], request.name, request.watch_type, request.watch_value),
+    )
+    row = _jsonify_row(dict(cur.fetchone()))
+    conn.commit()
+    conn.close()
+    return row
+
+
+@app.delete("/workspace/watchlists/{watchlist_id}", status_code=204)
+def delete_watchlist(watchlist_id: str, current_user: dict = Depends(get_current_user)):
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM watchlists WHERE id = %s AND user_id = %s", (watchlist_id, current_user["sub"]))
+    conn.commit()
+    conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Workspaces
+# ---------------------------------------------------------------------------
+
+@app.get("/workspace/workspaces")
+def list_workspaces(current_user: dict = Depends(get_current_user)):
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute(
+        "SELECT id, name, description, state, is_default, created_at, updated_at FROM decoded_workspaces WHERE user_id = %s ORDER BY is_default DESC, created_at DESC",
+        (current_user["sub"],),
+    )
+    rows = [_jsonify_row(dict(r)) for r in cur.fetchall()]
+    conn.close()
+    return {"workspaces": rows}
+
+
+@app.post("/workspace/workspaces", status_code=201)
+def create_workspace(request: WorkspaceCreate, current_user: dict = Depends(get_current_user)):
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    if request.is_default:
+        # Unset existing default
+        cur.execute("UPDATE decoded_workspaces SET is_default = false WHERE user_id = %s", (current_user["sub"],))
+    cur.execute(
+        "INSERT INTO decoded_workspaces (user_id, name, description, state, is_default) VALUES (%s, %s, %s, %s, %s) RETURNING id, name, description, state, is_default, created_at",
+        (current_user["sub"], request.name, request.description, json.dumps(request.state), request.is_default),
+    )
+    row = _jsonify_row(dict(cur.fetchone()))
+    conn.commit()
+    conn.close()
+    return row
+
+
+@app.put("/workspace/workspaces/{workspace_id}")
+def update_workspace(
+    workspace_id: str,
+    request: WorkspaceUpdate,
+    current_user: dict = Depends(get_current_user),
+):
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    # Verify ownership
+    cur.execute("SELECT id FROM decoded_workspaces WHERE id = %s AND user_id = %s", (workspace_id, current_user["sub"]))
+    if not cur.fetchone():
+        conn.close()
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    updates = {}
+    if request.name is not None:
+        updates["name"] = request.name
+    if request.description is not None:
+        updates["description"] = request.description
+    if request.state is not None:
+        updates["state"] = json.dumps(request.state)
+    if not updates:
+        conn.close()
+        return {"status": "no changes"}
+    set_clause = ", ".join(f"{k} = %s" for k in updates)
+    values = list(updates.values()) + [workspace_id]
+    cur.execute(
+        f"UPDATE decoded_workspaces SET {set_clause} WHERE id = %s RETURNING id, name, description, state, is_default, updated_at",
+        values,
+    )
+    row = _jsonify_row(dict(cur.fetchone()))
+    conn.commit()
+    conn.close()
+    return row
 
 
 # ---------------------------------------------------------------------------
