@@ -4,7 +4,9 @@
  * Processes:
  *   decoded-api      — FastAPI + uvicorn (REST API + Pearl connectome)
  *   decoded-extract  — Paper extraction worker (Claude Haiku)
+ *   decoded-graph    — Neo4j graph sync worker (batch, runs on interval)
  *   decoded-connect  — Connection discovery worker (graph + LLM)
+ *   decoded-critique — Paper critique worker (Claude Sonnet)
  *   decoded-explorer — Vite React frontend (served by nginx in prod)
  *
  * Start:  pm2 start ecosystem.config.js
@@ -77,6 +79,29 @@ module.exports = {
       merge_logs: true,
     },
     {
+      name: 'decoded-graph',
+      cwd: '/Users/whit/Projects/Decoded',
+      script: '/Users/whit/Projects/Decoded/.venv/bin/python',
+      args: '-m decoded.graph.worker --limit 5000',
+      interpreter: 'none',
+      env: {
+        PYTHONPATH: '/Users/whit/Projects/Decoded',
+        DATABASE_URL: 'postgresql://whit@localhost:5432/encoded_human',
+        NEO4J_URI: 'bolt://localhost:7687',
+        NEO4J_USER: 'neo4j',
+      },
+      autorestart: true,
+      max_restarts: 50,
+      restart_delay: 300000,
+      min_uptime: '10s',
+      watch: false,
+      max_memory_restart: '512M',
+      log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
+      out_file: '/Users/whit/Projects/Decoded/logs/graph-out.log',
+      error_file: '/Users/whit/Projects/Decoded/logs/graph-error.log',
+      merge_logs: true,
+    },
+    {
       name: 'decoded-connect',
       cwd: '/Users/whit/Projects/Decoded',
       script: '/Users/whit/Projects/Decoded/.venv/bin/python',
@@ -99,6 +124,30 @@ module.exports = {
       log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
       out_file: '/Users/whit/Projects/Decoded/logs/connect-out.log',
       error_file: '/Users/whit/Projects/Decoded/logs/connect-error.log',
+      merge_logs: true,
+    },
+    {
+      name: 'decoded-critique',
+      cwd: '/Users/whit/Projects/Decoded',
+      script: '/Users/whit/Projects/Decoded/.venv/bin/python',
+      args: '-m decoded.critique.worker --limit 100',
+      interpreter: 'none',
+      env: {
+        PYTHONPATH: '/Users/whit/Projects/Decoded',
+        DATABASE_URL: 'postgresql://whit@localhost:5432/encoded_human',
+        NEO4J_URI: 'bolt://localhost:7687',
+        NEO4J_USER: 'neo4j',
+        ANTHROPIC_API_KEY: _env.ANTHROPIC_API_KEY || '',
+      },
+      autorestart: true,
+      max_restarts: 30,
+      restart_delay: 120000,
+      min_uptime: '10s',
+      watch: false,
+      max_memory_restart: '512M',
+      log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
+      out_file: '/Users/whit/Projects/Decoded/logs/critique-out.log',
+      error_file: '/Users/whit/Projects/Decoded/logs/critique-error.log',
       merge_logs: true,
     },
     {

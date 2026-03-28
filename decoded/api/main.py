@@ -270,9 +270,9 @@ def list_papers(
     where_clauses = ["p.title IS NOT NULL"]
     params: list[Any] = []
 
-    if status:
-        where_clauses.append("p.status = %s")
-        params.append(status)
+    status_filter = status or "extracted"
+    where_clauses.append("p.status = %s")
+    params.append(status_filter)
     if source:
         where_clauses.append("p.source = %s")
         params.append(source)
