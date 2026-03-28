@@ -343,7 +343,8 @@ def get_paper_connections(paper_id: str):
         FROM discovered_connections dc
         JOIN raw_papers p_a ON p_a.id = dc.paper_a_id
         JOIN raw_papers p_b ON p_b.id = dc.paper_b_id
-        WHERE dc.paper_a_id = %s OR dc.paper_b_id = %s
+        WHERE (dc.paper_a_id = %s OR dc.paper_b_id = %s)
+          AND dc.connection_type != 'replicates'
         ORDER BY dc.confidence DESC
         """,
         (paper_id, paper_id),
@@ -351,6 +352,46 @@ def get_paper_connections(paper_id: str):
     rows = [_jsonify_row(dict(r)) for r in cur.fetchall()]
     conn.close()
     return {"paper_id": paper_id, "connections": rows, "count": len(rows)}
+
+
+@app.get("/critiques")
+def list_critiques(limit: int = Query(20, le=100), skip: int = Query(0)):
+    """List all intelligence briefs (paper critiques) with paper metadata."""
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute(
+        """
+        SELECT pc.id, pc.paper_id, pc.overall_quality, pc.brief, pc.strengths,
+               pc.weaknesses, pc.connections_summary, pc.confidence_score,
+               pc.created_at, p.title as paper_title, p.journal, p.published_date
+        FROM paper_critiques pc
+        JOIN raw_papers p ON p.id = pc.paper_id
+        ORDER BY pc.created_at DESC
+        LIMIT %s OFFSET %s
+        """,
+        (limit, skip),
+    )
+    rows = [_jsonify_row(dict(r)) for r in cur.fetchall()]
+    cur.execute("SELECT COUNT(*) as n FROM paper_critiques")
+    total = cur.fetchone()["n"]
+    conn.close()
+    return {"critiques": rows, "total": total, "count": len(rows)}
+
+
+@app.get("/papers/{paper_id}/entities")
+def get_paper_entities(paper_id: str):
+    """Get extracted entities and claims for a paper."""
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute(
+        "SELECT entities, claims, mechanisms, methods, key_findings FROM extraction_results WHERE paper_id = %s LIMIT 1",
+        (paper_id,),
+    )
+    row = cur.fetchone()
+    conn.close()
+    if not row:
+        raise HTTPException(status_code=404, detail="No extraction data for this paper")
+    return _jsonify_row(dict(row))
 
 
 @app.get("/papers/{paper_id}/critique")
@@ -382,7 +423,7 @@ def list_connections(
     conn = get_db()
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
-    where_clauses = ["dc.confidence >= %s"]
+    where_clauses = ["dc.confidence >= %s", "dc.connection_type != 'replicates'"]
     params: list[Any] = [min_confidence]
 
     if connection_type:
@@ -430,7 +471,7 @@ def get_convergences(
         FROM raw_papers p
         JOIN discovered_connections dc
             ON dc.paper_a_id = p.id OR dc.paper_b_id = p.id
-        WHERE dc.confidence >= %s
+        WHERE dc.confidence >= %s AND dc.connection_type != 'replicates'
         GROUP BY p.id, p.title, p.doi
         HAVING COUNT(DISTINCT dc.id) >= 2
         ORDER BY connection_count DESC, avg_confidence DESC
@@ -547,10 +588,14 @@ def bridge_query(request: BridgeRequest):
         max_hops=request.max_hops,
     )
     # Serialize for JSON response
+    graph_paths = result.get("graph_paths", [])
     return {
         "concept_a": result["concept_a"],
         "concept_b": result["concept_b"],
-        "graph_paths_found": len(result.get("graph_paths", [])),
+        "graph_paths": graph_paths,
+        "graph_paths_found": len(graph_paths),
+        "papers_a": result.get("papers_a", [])[:5],
+        "papers_b": result.get("papers_b", [])[:5],
         "papers_a_count": len(result.get("papers_a", [])),
         "papers_b_count": len(result.get("papers_b", [])),
         "similar_papers": result.get("similar_papers", [])[:5],

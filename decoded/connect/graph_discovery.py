@@ -204,15 +204,18 @@ class GraphDiscovery:
         max_hops: int = 4,
     ) -> list[dict[str, Any]]:
         """Find paths between two concepts in the graph (for bridge queries)."""
+        ca_lower = concept_a.lower()
+        cb_lower = concept_b.lower()
         with self._driver.session() as s:
+            # Find paper nodes matching each concept, then find shortest paths between them
             result = s.run(
                 """
-                MATCH path = shortestPath(
-                    (a)-[*1..$hops]-(b)
-                )
-                WHERE (a.title CONTAINS $ca OR a.text CONTAINS $ca OR a.name CONTAINS $ca)
-                  AND (b.title CONTAINS $cb OR b.text CONTAINS $cb OR b.name CONTAINS $cb)
+                MATCH (a:Paper), (b:Paper)
+                WHERE (toLower(a.title) CONTAINS $ca OR toLower(coalesce(a.abstract,'')) CONTAINS $ca)
+                  AND (toLower(b.title) CONTAINS $cb OR toLower(coalesce(b.abstract,'')) CONTAINS $cb)
                   AND a.id <> b.id
+                WITH a, b LIMIT 5
+                MATCH path = shortestPath((a)-[*1..$hops]-(b))
                 RETURN [n in nodes(path) | {
                     labels: labels(n),
                     id: coalesce(n.id, ''),
@@ -225,8 +228,37 @@ class GraphDiscovery:
                 ORDER BY hops
                 LIMIT 5
                 """,
-                ca=concept_a,
-                cb=concept_b,
+                ca=ca_lower,
+                cb=cb_lower,
+                hops=max_hops,
+            )
+            paths = [dict(r) for r in result]
+            if paths:
+                return paths
+
+            # Fallback: search entity/claim/mechanism nodes too
+            result = s.run(
+                """
+                MATCH (a), (b)
+                WHERE (toLower(coalesce(a.title,'')) CONTAINS $ca OR toLower(coalesce(a.text,'')) CONTAINS $ca OR toLower(coalesce(a.name,'')) CONTAINS $ca)
+                  AND (toLower(coalesce(b.title,'')) CONTAINS $cb OR toLower(coalesce(b.text,'')) CONTAINS $cb OR toLower(coalesce(b.name,'')) CONTAINS $cb)
+                  AND id(a) <> id(b)
+                WITH a, b LIMIT 3
+                MATCH path = shortestPath((a)-[*1..$hops]-(b))
+                RETURN [n in nodes(path) | {
+                    labels: labels(n),
+                    id: coalesce(n.id, ''),
+                    title: coalesce(n.title, ''),
+                    text: coalesce(n.text, ''),
+                    name: coalesce(n.name, '')
+                }] as path_nodes,
+                [r in relationships(path) | type(r)] as rel_types,
+                length(path) as hops
+                ORDER BY hops
+                LIMIT 5
+                """,
+                ca=ca_lower,
+                cb=cb_lower,
                 hops=max_hops,
             )
             return [dict(r) for r in result]

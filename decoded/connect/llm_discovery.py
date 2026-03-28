@@ -114,7 +114,7 @@ Analyze whether these papers have a scientifically meaningful connection. If yes
 Respond in this exact JSON format (no markdown, no extra text):
 {{
   "connected": true/false,
-  "connection_type": "replicates|contradicts|extends|mechanism_for|shares_target|methodological_parallel|convergent_evidence|null",
+  "connection_type": "contradicts|extends|mechanism_for|shares_target|methodological_parallel|convergent_evidence|null",
   "description": "One clear sentence describing the connection",
   "confidence": 0.0-1.0,
   "novelty_score": 0.0-1.0,
@@ -146,6 +146,9 @@ If the connection is not meaningful or too superficial, set "connected": false."
                 return None
 
         if not data.get("connected"):
+            return None
+
+        if data.get("connection_type") == "replicates":
             return None
 
         return {
