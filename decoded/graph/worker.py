@@ -272,6 +272,13 @@ def main():
     for k, v in stats.items():
         print(f"  {k}: {v:,}")
 
+    # Exponential backoff when no new work to prevent tight restart loops
+    if stats.get("papers_processed", 0) == 0:
+        import time
+        backoff = int(os.environ.get("DECODE_GRAPH_BACKOFF", "300"))
+        logger.info("No new papers to graph — sleeping %ds before exit", backoff)
+        time.sleep(backoff)
+
     # Final verification
     builder = GraphBuilder(
         uri=args.neo4j_uri,

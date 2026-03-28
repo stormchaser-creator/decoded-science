@@ -66,11 +66,15 @@ module.exports = {
         NEO4J_USER: 'neo4j',
         REDIS_URL: 'redis://localhost:6379/0',
         ANTHROPIC_API_KEY: _env.ANTHROPIC_API_KEY || '',
+        // Backoff: worker sleeps this many seconds before exit when queue is empty
+        DECODE_EMPTY_BACKOFF: '120',
+        DECODE_ERROR_BACKOFF: '60',
       },
       autorestart: true,
-      max_restarts: 50,
-      restart_delay: 30000,
-      min_uptime: '5s',
+      max_restarts: 200,      // allow more restarts since each is intentional (queue drain)
+      restart_delay: 5000,    // PM2 delay between restarts (worker handles its own backoff)
+      min_uptime: '30s',
+      exp_backoff_restart_delay: 100,  // PM2 exponential backoff on crash (ms, doubles each time)
       watch: false,
       max_memory_restart: '512M',
       log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
@@ -89,11 +93,14 @@ module.exports = {
         DATABASE_URL: 'postgresql://whit@localhost:5432/encoded_human',
         NEO4J_URI: 'bolt://localhost:7687',
         NEO4J_USER: 'neo4j',
+        // Worker sleeps this many seconds when nothing to process, before exit
+        DECODE_GRAPH_BACKOFF: '300',
       },
       autorestart: true,
-      max_restarts: 50,
-      restart_delay: 300000,
-      min_uptime: '10s',
+      max_restarts: 100,
+      restart_delay: 10000,
+      min_uptime: '30s',
+      exp_backoff_restart_delay: 100,
       watch: false,
       max_memory_restart: '512M',
       log_date_format: 'YYYY-MM-DD HH:mm:ss Z',

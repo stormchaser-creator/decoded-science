@@ -12,6 +12,7 @@ import GapsPage from './pages/GapsPage.jsx'
 import BriefsPage from './pages/BriefsPage.jsx'
 import BridgePage from './pages/BridgePage.jsx'
 import AnalyzePage from './pages/AnalyzePage.jsx'
+import ExplorePage from './pages/ExplorePage.jsx'
 import WorkspacePage from './pages/WorkspacePage.jsx'
 import { LoginPage, RegisterPage } from './pages/AuthPages.jsx'
 
@@ -19,7 +20,34 @@ import { LoginPage, RegisterPage } from './pages/AuthPages.jsx'
 // Home page
 // ---------------------------------------------------------------------------
 
-function HomePage({ stats }) {
+function FeaturedBrief({ brief }) {
+  const quality = parseFloat(brief.overall_quality) || 0
+  return (
+    <Link to={`/papers/${brief.paper_id}`} style={{ textDecoration: 'none' }}>
+      <div
+        style={{ ...s.card, padding: '16px', transition: 'border-color 0.15s' }}
+        onMouseEnter={e => e.currentTarget.style.borderColor = '#7c6af7'}
+        onMouseLeave={e => e.currentTarget.style.borderColor = '#1e1e2e'}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px' }}>
+          <div style={{ fontSize: '13px', fontWeight: '600', color: '#c4bef8', lineHeight: '1.4', flex: 1 }}>
+            {brief.paper_title}
+          </div>
+          <div style={{ fontSize: '16px', fontWeight: '700', color: quality >= 7 ? '#4ade80' : '#fbbf24', flexShrink: 0 }}>
+            {quality.toFixed(0)}
+          </div>
+        </div>
+        {brief.connections_summary && (
+          <p style={{ fontSize: '12px', color: '#6b7280', margin: '6px 0 0', lineHeight: '1.5', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
+            {brief.connections_summary}
+          </p>
+        )}
+      </div>
+    </Link>
+  )
+}
+
+function HomePage({ stats, featuredBriefs }) {
   return (
     <div style={{ ...s.page, paddingTop: '48px' }}>
       <div style={{ textAlign: 'center', maxWidth: '600px', margin: '0 auto 48px' }}>
@@ -37,7 +65,7 @@ function HomePage({ stats }) {
             { label: 'Total Papers', value: stats.papers?.total?.toLocaleString(), color: '#7c6af7' },
             { label: 'Extracted', value: (stats.papers?.by_status?.extracted || 0).toLocaleString(), color: '#4ade80' },
             { label: 'Connections', value: stats.connections?.total?.toLocaleString(), color: '#fbbf24' },
-            { label: 'Critiques', value: stats.critiques?.toLocaleString(), color: '#60a5fa' },
+            { label: 'Intelligence Briefs', value: stats.critiques?.toLocaleString(), color: '#60a5fa' },
           ].map(({ label, value, color }) => (
             <div key={label} style={{ ...s.card, textAlign: 'center', padding: '24px' }}>
               <div style={{ ...s.bigStat, color }}>{value || '—'}</div>
@@ -46,12 +74,12 @@ function HomePage({ stats }) {
           ))}
         </div>
       )}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '16px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '16px', marginBottom: '48px' }}>
         {[
           { to: '/papers', icon: '📄', title: 'Papers', desc: 'Browse and search the full paper library with AI-extracted metadata.' },
+          { to: '/explore', icon: '⬡', title: 'Graph Explorer', desc: 'Interactive force-directed graph of paper connections, colored by discipline.' },
           { to: '/connections', icon: '🔗', title: 'Connections', desc: 'Explore cross-paper relationships: contradictions, extensions, and mechanisms.' },
           { to: '/convergences', icon: '🎯', title: 'Convergences', desc: 'Find research hotspots where multiple papers converge on the same findings.' },
-          { to: '/gaps', icon: '🔍', title: 'Field Gaps', desc: 'Identify well-connected papers lacking a critique — potential research opportunities.' },
           { to: '/briefs', icon: '🧠', title: 'Intelligence Briefs', desc: 'AI-generated quality assessments for extracted papers.' },
           { to: '/bridge', icon: '🌉', title: 'Bridge Query', desc: 'Find hidden paths connecting two research concepts through the graph.' },
         ].map(({ to, icon, title, desc }) => (
@@ -68,6 +96,20 @@ function HomePage({ stats }) {
           </Link>
         ))}
       </div>
+
+      {featuredBriefs && featuredBriefs.length > 0 && (
+        <div style={{ marginBottom: '48px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+            <h2 style={{ fontSize: '16px', fontWeight: '700', color: '#e0e0e8', margin: 0 }}>Featured Intelligence Briefs</h2>
+            <Link to="/briefs?quality=high" style={{ fontSize: '12px', color: '#7c6af7', textDecoration: 'none' }}>View all high-quality →</Link>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+            {featuredBriefs.slice(0, 4).map((b, i) => (
+              <FeaturedBrief key={b.id || i} brief={b} />
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -88,9 +130,9 @@ function Header({ stats }) {
       </div>
       <nav style={s.nav}>
         <NavLink to="/papers" style={navLinkStyle}>Papers</NavLink>
+        <NavLink to="/explore" style={navLinkStyle}>Graph</NavLink>
         <NavLink to="/connections" style={navLinkStyle}>Connections</NavLink>
         <NavLink to="/convergences" style={navLinkStyle}>Convergences</NavLink>
-        <NavLink to="/gaps" style={navLinkStyle}>Gaps</NavLink>
         <NavLink to="/briefs" style={navLinkStyle}>Briefs</NavLink>
         <NavLink to="/bridge" style={navLinkStyle}>Bridge</NavLink>
         <NavLink to="/analyze" style={navLinkStyle}>Analyze</NavLink>
@@ -123,12 +165,12 @@ function Header({ stats }) {
 // App shell
 // ---------------------------------------------------------------------------
 
-function AppInner({ stats }) {
+function AppInner({ stats, featuredBriefs }) {
   return (
     <div style={s.app}>
       <Header stats={stats} />
       <Routes>
-        <Route path="/" element={<HomePage stats={stats} />} />
+        <Route path="/" element={<HomePage stats={stats} featuredBriefs={featuredBriefs} />} />
         <Route path="/papers" element={<PapersPage />} />
         <Route path="/papers/:id" element={<PaperDetailPage />} />
         <Route path="/paper/:id" element={<PaperDetailPage />} />
@@ -138,6 +180,7 @@ function AppInner({ stats }) {
         <Route path="/briefs" element={<BriefsPage />} />
         <Route path="/bridge" element={<BridgePage />} />
         <Route path="/analyze" element={<AnalyzePage />} />
+        <Route path="/explore" element={<ExplorePage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
         <Route path="/workspace" element={<WorkspacePage />} />
@@ -148,15 +191,19 @@ function AppInner({ stats }) {
 
 export default function App() {
   const [stats, setStats] = useState(null)
+  const [featuredBriefs, setFeaturedBriefs] = useState(null)
 
   useEffect(() => {
     fetch(`${API}/stats`).then(r => r.json()).then(setStats).catch(() => {})
+    fetch(`${API}/critiques?limit=5&quality=high`).then(r => r.json())
+      .then(d => setFeaturedBriefs(d.critiques || []))
+      .catch(() => {})
   }, [])
 
   return (
     <BrowserRouter>
       <AuthProvider>
-        <AppInner stats={stats} />
+        <AppInner stats={stats} featuredBriefs={featuredBriefs} />
       </AuthProvider>
     </BrowserRouter>
   )

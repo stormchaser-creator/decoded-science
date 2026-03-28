@@ -1,5 +1,38 @@
 export const API = import.meta.env.VITE_API_URL || '/api'
 
+// Epistemic color system (Step 4)
+export const EPISTEMIC = {
+  fact: '#3b82f6',         // blue
+  interpretation: '#8b5cf6', // purple
+  hypothesis: '#f59e0b',   // amber
+  convergence: '#10b981',  // green
+  contradiction: '#f43f5e', // red
+  speculation: '#94a3b8',  // slate
+}
+
+export function epistemicColor(evidenceStrength) {
+  if (!evidenceStrength) return EPISTEMIC.speculation
+  const s = evidenceStrength.toLowerCase()
+  if (s.includes('strong') || s.includes('high') || s.includes('direct')) return EPISTEMIC.fact
+  if (s.includes('moderate') || s.includes('medium')) return EPISTEMIC.interpretation
+  if (s.includes('weak') || s.includes('low') || s.includes('indirect')) return EPISTEMIC.hypothesis
+  if (s.includes('convergent') || s.includes('replicate')) return EPISTEMIC.convergence
+  if (s.includes('contradict')) return EPISTEMIC.contradiction
+  return EPISTEMIC.speculation
+}
+
+export function connectionEpistemicColor(connectionType) {
+  if (!connectionType) return EPISTEMIC.speculation
+  const t = connectionType.toLowerCase()
+  if (t === 'contradicts') return EPISTEMIC.contradiction
+  if (t === 'extends') return EPISTEMIC.fact
+  if (t === 'mechanism_for') return EPISTEMIC.interpretation
+  if (t === 'shares_target') return EPISTEMIC.hypothesis
+  if (t === 'convergent_evidence') return EPISTEMIC.convergence
+  if (t === 'methodological_parallel') return EPISTEMIC.speculation
+  return EPISTEMIC.speculation
+}
+
 export const s = {
   app: { minHeight: '100vh', background: '#0a0a0f', color: '#e0e0e8', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif' },
   header: { borderBottom: '1px solid #1e1e2e', padding: '12px 24px', display: 'flex', alignItems: 'center', gap: '20px', background: '#0d0d18', position: 'sticky', top: 0, zIndex: 100 },

@@ -388,6 +388,18 @@ def main():
     for k, v in stats.items():
         print(f"  {k}: {v}")
 
+    # Exponential backoff when queue is empty to prevent crash-loop restarts
+    if stats.get("total", 0) == 0:
+        import time
+        backoff = int(os.environ.get("DECODE_EMPTY_BACKOFF", "60"))
+        logger.info("No papers to extract — sleeping %ds before exit (PM2 restart_delay handles backoff)", backoff)
+        time.sleep(backoff)
+    elif stats.get("extracted", 0) == 0 and stats.get("errors", 0) > 0:
+        import time
+        backoff = int(os.environ.get("DECODE_ERROR_BACKOFF", "30"))
+        logger.warning("All papers errored — sleeping %ds before exit", backoff)
+        time.sleep(backoff)
+
 
 if __name__ == "__main__":
     main()
