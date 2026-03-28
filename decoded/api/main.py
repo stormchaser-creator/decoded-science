@@ -343,7 +343,8 @@ def get_paper_connections(paper_id: str):
         FROM discovered_connections dc
         JOIN raw_papers p_a ON p_a.id = dc.paper_a_id
         JOIN raw_papers p_b ON p_b.id = dc.paper_b_id
-        WHERE dc.paper_a_id = %s OR dc.paper_b_id = %s
+        WHERE (dc.paper_a_id = %s OR dc.paper_b_id = %s)
+          AND dc.connection_type != 'replicates'
         ORDER BY dc.confidence DESC
         """,
         (paper_id, paper_id),
@@ -382,7 +383,7 @@ def list_connections(
     conn = get_db()
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
-    where_clauses = ["dc.confidence >= %s"]
+    where_clauses = ["dc.confidence >= %s", "dc.connection_type != 'replicates'"]
     params: list[Any] = [min_confidence]
 
     if connection_type:
@@ -430,7 +431,7 @@ def get_convergences(
         FROM raw_papers p
         JOIN discovered_connections dc
             ON dc.paper_a_id = p.id OR dc.paper_b_id = p.id
-        WHERE dc.confidence >= %s
+        WHERE dc.confidence >= %s AND dc.connection_type != 'replicates'
         GROUP BY p.id, p.title, p.doi
         HAVING COUNT(DISTINCT dc.id) >= 2
         ORDER BY connection_count DESC, avg_confidence DESC
