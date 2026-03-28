@@ -2,7 +2,9 @@
  * Decoded PM2 Ecosystem Config
  *
  * Processes:
- *   decoded-api   — FastAPI + uvicorn (REST API + Pearl connectome)
+ *   decoded-api      — FastAPI + uvicorn (REST API + Pearl connectome)
+ *   decoded-extract  — Paper extraction worker (Claude Haiku)
+ *   decoded-connect  — Connection discovery worker (graph + LLM)
  *   decoded-explorer — Vite React frontend (served by nginx in prod)
  *
  * Start:  pm2 start ecosystem.config.js
@@ -60,6 +62,30 @@ module.exports = {
       log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
       out_file: '/Users/whit/Projects/Decoded/logs/extract-out.log',
       error_file: '/Users/whit/Projects/Decoded/logs/extract-error.log',
+      merge_logs: true,
+    },
+    {
+      name: 'decoded-connect',
+      cwd: '/Users/whit/Projects/Decoded',
+      script: '/Users/whit/Projects/Decoded/.venv/bin/python',
+      args: '-m decoded.connect.worker --limit 500',
+      interpreter: 'none',
+      env: {
+        PYTHONPATH: '/Users/whit/Projects/Decoded',
+        DATABASE_URL: 'postgresql://whit@localhost:5432/encoded_human',
+        NEO4J_URI: 'bolt://localhost:7687',
+        NEO4J_USER: 'neo4j',
+        REDIS_URL: 'redis://localhost:6379/0',
+      },
+      autorestart: true,
+      max_restarts: 20,
+      restart_delay: 60000,
+      min_uptime: '10s',
+      watch: false,
+      max_memory_restart: '512M',
+      log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
+      out_file: '/Users/whit/Projects/Decoded/logs/connect-out.log',
+      error_file: '/Users/whit/Projects/Decoded/logs/connect-error.log',
       merge_logs: true,
     },
     {
