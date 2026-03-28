@@ -91,17 +91,9 @@ export default function BriefsPage() {
       {!loading && briefs.map((b, i) => {
         const key = b.id || i
         const isOpen = expanded[key]
-        const quality = parseFloat(b.overall_quality) || 0
-        const confidence = parseFloat(b.confidence_score) || 0
-        const keyInsight = (() => {
-          const ki = b.key_insight
-          if (!ki) return null
-          if (typeof ki === 'string') {
-            try { const p = JSON.parse(ki); return Array.isArray(p) ? p[0] : ki } catch { return ki }
-          }
-          if (Array.isArray(ki)) return ki[0]
-          return null
-        })()
+        const qualityLabel = b.overall_quality || ''
+        const qualityScore = qualityLabel === 'high' ? 8 : qualityLabel === 'medium' ? 6 : qualityLabel === 'low' ? 4 : 0
+        const novelty = parseFloat(b.novelty_score) || 0
         return (
           <div key={key} style={s.card}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px' }}>
@@ -118,37 +110,29 @@ export default function BriefsPage() {
                 </div>
               </div>
               <div style={{ display: 'flex', gap: '12px', flexShrink: 0 }}>
-                {quality > 0 && (
+                {qualityScore > 0 && (
                   <div style={{ textAlign: 'center', minWidth: '40px' }}>
-                    <div style={{ fontSize: '20px', fontWeight: '700', color: quality >= 7 ? '#4ade80' : quality >= 5 ? '#fbbf24' : '#f87171' }}>
-                      {quality.toFixed(0)}
+                    <div style={{ fontSize: '14px', fontWeight: '700', color: qualityLabel === 'high' ? '#4ade80' : qualityLabel === 'medium' ? '#fbbf24' : '#f87171' }}>
+                      {qualityLabel}
                     </div>
                     <div style={{ fontSize: '10px', color: '#6b7280' }}>quality</div>
                   </div>
                 )}
-                {confidence > 0 && (
+                {novelty > 0 && (
                   <div style={{ textAlign: 'center', minWidth: '40px' }}>
                     <div style={{ fontSize: '20px', fontWeight: '700', color: '#60a5fa' }}>
-                      {(confidence * 100).toFixed(0)}%
+                      {novelty.toFixed(1)}
                     </div>
-                    <div style={{ fontSize: '10px', color: '#6b7280' }}>conf</div>
+                    <div style={{ fontSize: '10px', color: '#6b7280' }}>novelty</div>
                   </div>
                 )}
               </div>
             </div>
 
-            {keyInsight && (
-              <div style={{ marginTop: '8px', padding: '8px 12px', background: '#0a0a20', borderLeft: '3px solid #7c6af7', borderRadius: '0 4px 4px 0' }}>
-                <div style={{ fontSize: '10px', color: '#7c6af7', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '3px' }}>Key Insight</div>
-                <p style={{ fontSize: '13px', color: '#a0a0b8', margin: 0, lineHeight: '1.5' }}>
-                  {typeof keyInsight === 'string' ? keyInsight : JSON.stringify(keyInsight)}
-                </p>
-              </div>
-            )}
-
-            {b.connections_summary && !keyInsight && (
-              <p style={{ fontSize: '13px', color: '#a0a0b8', marginTop: '10px', lineHeight: '1.6', marginBottom: 0 }}>
-                {b.connections_summary}
+            {b.brief && (
+              <p style={{ fontSize: '13px', color: '#a0a0b8', marginTop: '8px', lineHeight: '1.6', marginBottom: 0,
+                display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                {b.brief}
               </p>
             )}
             <div style={{ marginTop: '10px' }}>
@@ -161,11 +145,6 @@ export default function BriefsPage() {
             </div>
             {isOpen && (
               <div style={{ marginTop: '12px', borderTop: '1px solid #1e1e2e', paddingTop: '12px' }}>
-                {b.connections_summary && keyInsight && (
-                  <p style={{ fontSize: '13px', color: '#a0a0b8', lineHeight: '1.6', marginTop: 0 }}>
-                    {b.connections_summary}
-                  </p>
-                )}
                 {b.brief && (
                   <p style={{ fontSize: '13px', color: '#a0a0b8', lineHeight: '1.7', whiteSpace: 'pre-wrap', marginTop: 0 }}>
                     {b.brief}

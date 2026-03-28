@@ -218,7 +218,7 @@ export default function PaperDetailPage() {
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
                 {mechanisms.map((m, i) => (
                   <span key={i} style={{ ...s.tag, borderLeft: `3px solid ${EPISTEMIC.hypothesis}`, marginTop: 0, color: '#93c5fd', background: '#0a0a20' }}>
-                    {typeof m === 'string' ? m : (m.name || m.text || JSON.stringify(m))}
+                    {typeof m === 'string' ? m : (m.description || m.name || m.text || JSON.stringify(m))}
                   </span>
                 ))}
               </div>

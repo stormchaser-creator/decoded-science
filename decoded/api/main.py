@@ -366,25 +366,24 @@ def list_critiques(
 
     quality_filter = ""
     if quality == "high":
-        quality_filter = "AND pc.overall_quality >= 7"
+        quality_filter = "AND pc.overall_quality = 'high'"
     elif quality == "medium":
-        quality_filter = "AND pc.overall_quality >= 5 AND pc.overall_quality < 7"
+        quality_filter = "AND pc.overall_quality = 'medium'"
     elif quality == "low":
-        quality_filter = "AND pc.overall_quality < 5"
+        quality_filter = "AND pc.overall_quality = 'low'"
 
     cur.execute(
         f"""
-        SELECT pc.id, pc.paper_id, pc.overall_quality, pc.brief, pc.strengths,
-               pc.weaknesses, pc.connections_summary, pc.confidence_score,
+        SELECT pc.id, pc.paper_id, pc.overall_quality, pc.summary as brief, pc.strengths,
+               pc.weaknesses, pc.red_flags, pc.recommendation,
+               pc.methodology_score, pc.novelty_score, pc.reproducibility_score,
                pc.created_at, p.title as paper_title, p.journal, p.published_date,
-               e.key_findings as key_insight,
                (SELECT COUNT(*) FROM discovered_connections dc
                 WHERE dc.paper_a_id = pc.paper_id OR dc.paper_b_id = pc.paper_id) as connection_count
         FROM paper_critiques pc
         JOIN raw_papers p ON p.id = pc.paper_id
-        LEFT JOIN extraction_results e ON e.paper_id = pc.paper_id
         WHERE 1=1 {quality_filter}
-        ORDER BY pc.overall_quality DESC NULLS LAST, pc.created_at DESC
+        ORDER BY pc.methodology_score DESC NULLS LAST, pc.created_at DESC
         LIMIT %s OFFSET %s
         """,
         (limit, skip),
