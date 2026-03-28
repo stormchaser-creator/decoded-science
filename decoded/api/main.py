@@ -355,27 +355,57 @@ def get_paper_connections(paper_id: str):
 
 
 @app.get("/critiques")
-def list_critiques(limit: int = Query(20, le=100), skip: int = Query(0)):
+def list_critiques(
+    limit: int = Query(20, le=100),
+    skip: int = Query(0),
+    quality: str | None = Query(None),  # high | medium | low
+):
     """List all intelligence briefs (paper critiques) with paper metadata."""
     conn = get_db()
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+    quality_filter = ""
+    if quality == "high":
+        quality_filter = "AND pc.overall_quality >= 7"
+    elif quality == "medium":
+        quality_filter = "AND pc.overall_quality >= 5 AND pc.overall_quality < 7"
+    elif quality == "low":
+        quality_filter = "AND pc.overall_quality < 5"
+
     cur.execute(
-        """
+        f"""
         SELECT pc.id, pc.paper_id, pc.overall_quality, pc.brief, pc.strengths,
                pc.weaknesses, pc.connections_summary, pc.confidence_score,
-               pc.created_at, p.title as paper_title, p.journal, p.published_date
+               pc.created_at, p.title as paper_title, p.journal, p.published_date,
+               e.key_findings as key_insight,
+               (SELECT COUNT(*) FROM discovered_connections dc
+                WHERE dc.paper_a_id = pc.paper_id OR dc.paper_b_id = pc.paper_id) as connection_count
         FROM paper_critiques pc
         JOIN raw_papers p ON p.id = pc.paper_id
-        ORDER BY pc.created_at DESC
+        LEFT JOIN extraction_results e ON e.paper_id = pc.paper_id
+        WHERE 1=1 {quality_filter}
+        ORDER BY pc.overall_quality DESC NULLS LAST, pc.created_at DESC
         LIMIT %s OFFSET %s
         """,
         (limit, skip),
     )
     rows = [_jsonify_row(dict(r)) for r in cur.fetchall()]
-    cur.execute("SELECT COUNT(*) as n FROM paper_critiques")
+
+    count_query = f"SELECT COUNT(*) as n FROM paper_critiques pc WHERE 1=1 {quality_filter}"
+    cur.execute(count_query)
     total = cur.fetchone()["n"]
     conn.close()
     return {"critiques": rows, "total": total, "count": len(rows)}
+
+
+@app.get("/v1/briefs")
+def list_briefs_v1(
+    limit: int = Query(20, le=100),
+    skip: int = Query(0),
+    quality: str | None = Query(None),
+):
+    """Alias for /critiques — intelligence briefs with full metadata."""
+    return list_critiques(limit=limit, skip=skip, quality=quality)
 
 
 @app.get("/papers/{paper_id}/entities")
@@ -1020,6 +1050,445 @@ def update_workspace(
     conn.commit()
     conn.close()
     return row
+
+
+# ---------------------------------------------------------------------------
+# v1/stats — comprehensive stats endpoint (Step 8)
+# ---------------------------------------------------------------------------
+
+@app.get("/v1/stats")
+def stats_v1():
+    """Comprehensive stats including entities, claims, graph nodes, relationships."""
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+    cur.execute("SELECT status, count(*) as n FROM raw_papers GROUP BY status ORDER BY n DESC")
+    paper_stats = {r["status"]: r["n"] for r in cur.fetchall()}
+
+    cur.execute("SELECT count(*) as n FROM raw_papers")
+    total_papers = cur.fetchone()["n"]
+
+    cur.execute("SELECT count(*) as n FROM extraction_results")
+    total_extractions = cur.fetchone()["n"]
+
+    cur.execute("SELECT count(*) as n FROM discovered_connections WHERE connection_type != 'replicates'")
+    total_connections = cur.fetchone()["n"]
+
+    cur.execute("SELECT count(*) as n FROM paper_critiques")
+    total_critiques = cur.fetchone()["n"]
+
+    cur.execute("SELECT count(*) as n FROM paper_critiques WHERE overall_quality >= 7")
+    high_quality_critiques = cur.fetchone()["n"]
+
+    # Count entities and claims from extraction_results JSONB
+    cur.execute("""
+        SELECT
+            COALESCE(SUM(jsonb_array_length(entities::jsonb)), 0) as total_entities,
+            COALESCE(SUM(jsonb_array_length(claims::jsonb)), 0) as total_claims
+        FROM extraction_results
+        WHERE entities IS NOT NULL AND claims IS NOT NULL
+          AND entities != 'null' AND claims != 'null'
+          AND entities::text LIKE '[%' AND claims::text LIKE '[%'
+    """)
+    row = cur.fetchone()
+    total_entities = int(row["total_entities"] or 0)
+    total_claims = int(row["total_claims"] or 0)
+
+    cur.execute("SELECT connection_type, count(*) as n FROM discovered_connections WHERE connection_type != 'replicates' GROUP BY connection_type ORDER BY n DESC")
+    connection_types = {r["connection_type"]: r["n"] for r in cur.fetchall()}
+
+    # Try to get Neo4j counts
+    graph_nodes = 0
+    graph_relationships = 0
+    try:
+        from neo4j import GraphDatabase
+        neo4j_uri = os.environ.get("NEO4J_URI", "bolt://localhost:7687")
+        neo4j_user = os.environ.get("NEO4J_USER", "neo4j")
+        neo4j_pw = os.environ.get("NEO4J_PASSWORD", "decoded123")
+        driver = GraphDatabase.driver(neo4j_uri, auth=(neo4j_user, neo4j_pw))
+        with driver.session() as s:
+            graph_nodes = s.run("MATCH (n) RETURN count(n) as c").single()["c"]
+            graph_relationships = s.run("MATCH ()-[r]->() RETURN count(r) as c").single()["c"]
+        driver.close()
+    except Exception:
+        pass
+
+    conn.close()
+    return {
+        "papers": {"total": total_papers, "by_status": paper_stats},
+        "extractions": total_extractions,
+        "connections": {"total": total_connections, "by_type": connection_types},
+        "critiques": total_critiques,
+        "high_quality_critiques": high_quality_critiques,
+        "entities": total_entities,
+        "claims": total_claims,
+        "graph": {"nodes": graph_nodes, "relationships": graph_relationships},
+    }
+
+
+# ---------------------------------------------------------------------------
+# v1/graph — graph data endpoints for visualization (Step 3)
+# ---------------------------------------------------------------------------
+
+@app.get("/v1/graph/overview")
+def graph_overview(limit: int = Query(200, le=500)):
+    """Top most-connected papers and their connections for force-graph visualization."""
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+    # Get top papers by connection count
+    cur.execute(
+        """
+        SELECT p.id, p.title, p.journal, p.source,
+               COUNT(DISTINCT dc.id) as connection_count
+        FROM raw_papers p
+        JOIN discovered_connections dc ON dc.paper_a_id = p.id OR dc.paper_b_id = p.id
+        WHERE dc.connection_type != 'replicates'
+        GROUP BY p.id, p.title, p.journal, p.source
+        ORDER BY connection_count DESC
+        LIMIT %s
+        """,
+        (limit,),
+    )
+    papers = [dict(r) for r in cur.fetchall()]
+    paper_ids = {str(p["id"]) for p in papers}
+
+    # Get connections between these papers
+    if paper_ids:
+        placeholders = ",".join(["%s"] * len(paper_ids))
+        cur.execute(
+            f"""
+            SELECT id, paper_a_id, paper_b_id, connection_type, confidence, novelty_score
+            FROM discovered_connections
+            WHERE paper_a_id IN ({placeholders})
+              AND paper_b_id IN ({placeholders})
+              AND connection_type != 'replicates'
+            ORDER BY confidence DESC
+            LIMIT 2000
+            """,
+            (*paper_ids, *paper_ids),
+        )
+        connections = [dict(r) for r in cur.fetchall()]
+    else:
+        connections = []
+
+    conn.close()
+
+    nodes = [
+        {
+            "id": str(p["id"]),
+            "label": (p["title"] or "")[:60],
+            "title": p["title"],
+            "journal": p["journal"],
+            "source": p["source"],
+            "val": min(p["connection_count"], 20),
+        }
+        for p in papers
+    ]
+    links = [
+        {
+            "source": str(c["paper_a_id"]),
+            "target": str(c["paper_b_id"]),
+            "type": c["connection_type"],
+            "confidence": float(c["confidence"] or 0),
+        }
+        for c in connections
+        if str(c["paper_a_id"]) in paper_ids and str(c["paper_b_id"]) in paper_ids
+    ]
+    return {"nodes": nodes, "links": links, "node_count": len(nodes), "link_count": len(links)}
+
+
+@app.get("/v1/graph/neighborhood/{paper_id}")
+def graph_neighborhood(paper_id: str, hops: int = Query(2, le=3)):
+    """Papers within N hops of a paper node."""
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+    # Get direct connections first
+    cur.execute(
+        """
+        SELECT dc.paper_a_id, dc.paper_b_id, dc.connection_type, dc.confidence,
+               p_a.title as title_a, p_b.title as title_b,
+               p_a.journal as journal_a, p_b.journal as journal_b,
+               p_a.source as source_a, p_b.source as source_b
+        FROM discovered_connections dc
+        JOIN raw_papers p_a ON p_a.id = dc.paper_a_id
+        JOIN raw_papers p_b ON p_b.id = dc.paper_b_id
+        WHERE (dc.paper_a_id = %s OR dc.paper_b_id = %s)
+          AND dc.connection_type != 'replicates'
+        ORDER BY dc.confidence DESC
+        LIMIT 100
+        """,
+        (paper_id, paper_id),
+    )
+    direct = [dict(r) for r in cur.fetchall()]
+
+    # Collect all neighbor IDs for hop 2
+    neighbor_ids = set()
+    for row in direct:
+        neighbor_ids.add(str(row["paper_a_id"]))
+        neighbor_ids.add(str(row["paper_b_id"]))
+    neighbor_ids.discard(str(paper_id))
+
+    hop2_connections = []
+    if hops >= 2 and neighbor_ids:
+        placeholders = ",".join(["%s"] * len(neighbor_ids))
+        cur.execute(
+            f"""
+            SELECT dc.paper_a_id, dc.paper_b_id, dc.connection_type, dc.confidence,
+                   p_a.title as title_a, p_b.title as title_b,
+                   p_a.journal as journal_a, p_b.journal as journal_b,
+                   p_a.source as source_a, p_b.source as source_b
+            FROM discovered_connections dc
+            JOIN raw_papers p_a ON p_a.id = dc.paper_a_id
+            JOIN raw_papers p_b ON p_b.id = dc.paper_b_id
+            WHERE (dc.paper_a_id IN ({placeholders}) OR dc.paper_b_id IN ({placeholders}))
+              AND dc.connection_type != 'replicates'
+            ORDER BY dc.confidence DESC
+            LIMIT 200
+            """,
+            (*neighbor_ids, *neighbor_ids),
+        )
+        hop2_connections = [dict(r) for r in cur.fetchall()]
+
+    conn.close()
+
+    all_connections = direct + hop2_connections
+    node_map = {}
+    for row in all_connections:
+        for pid, title, journal, source in [
+            (str(row["paper_a_id"]), row["title_a"], row["journal_a"], row["source_a"]),
+            (str(row["paper_b_id"]), row["title_b"], row["journal_b"], row["source_b"]),
+        ]:
+            if pid not in node_map:
+                node_map[pid] = {"id": pid, "title": title, "journal": journal, "source": source, "val": 5}
+
+    # Center node gets bigger
+    if str(paper_id) in node_map:
+        node_map[str(paper_id)]["val"] = 15
+        node_map[str(paper_id)]["center"] = True
+
+    links = [
+        {
+            "source": str(r["paper_a_id"]),
+            "target": str(r["paper_b_id"]),
+            "type": r["connection_type"],
+            "confidence": float(r["confidence"] or 0),
+        }
+        for r in all_connections
+    ]
+    return {"nodes": list(node_map.values()), "links": links}
+
+
+@app.get("/v1/graph/cluster/{discipline}")
+def graph_cluster(discipline: str):
+    """Papers from a specific source/journal cluster."""
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute(
+        """
+        SELECT p.id, p.title, p.journal, p.source,
+               COUNT(DISTINCT dc.id) as connection_count
+        FROM raw_papers p
+        LEFT JOIN discovered_connections dc ON dc.paper_a_id = p.id OR dc.paper_b_id = p.id
+        WHERE p.source = %s OR p.journal ILIKE %s
+        GROUP BY p.id, p.title, p.journal, p.source
+        ORDER BY connection_count DESC
+        LIMIT 100
+        """,
+        (discipline, f"%{discipline}%"),
+    )
+    papers = [dict(r) for r in cur.fetchall()]
+    paper_ids = {str(p["id"]) for p in papers}
+
+    links = []
+    if paper_ids:
+        placeholders = ",".join(["%s"] * len(paper_ids))
+        cur.execute(
+            f"""
+            SELECT paper_a_id, paper_b_id, connection_type, confidence
+            FROM discovered_connections
+            WHERE paper_a_id IN ({placeholders}) AND paper_b_id IN ({placeholders})
+              AND connection_type != 'replicates'
+            """,
+            (*paper_ids, *paper_ids),
+        )
+        links = [
+            {"source": str(r["paper_a_id"]), "target": str(r["paper_b_id"]),
+             "type": r["connection_type"], "confidence": float(r["confidence"] or 0)}
+            for r in cur.fetchall()
+        ]
+
+    conn.close()
+    nodes = [
+        {"id": str(p["id"]), "title": p["title"], "journal": p["journal"],
+         "source": p["source"], "val": min(int(p["connection_count"] or 1), 20)}
+        for p in papers
+    ]
+    return {"nodes": nodes, "links": links}
+
+
+# ---------------------------------------------------------------------------
+# v1/papers/analyze — on-demand DOI analysis with job tracking (Step 9)
+# ---------------------------------------------------------------------------
+
+import threading
+import uuid as _uuid
+import time as _time
+
+# In-memory job store (sufficient for single-process; use Redis for multi-worker prod)
+_analyze_jobs: dict = {}
+_jobs_lock = threading.Lock()
+
+
+class AnalyzeJobRequest(BaseModel):
+    doi: str
+    priority: int = 1
+
+
+@app.post("/v1/papers/analyze")
+async def analyze_doi_v1(request: AnalyzeJobRequest, background_tasks: BackgroundTasks):
+    """Queue DOI analysis and return a job_id for polling."""
+    job_id = str(_uuid.uuid4())
+    with _jobs_lock:
+        _analyze_jobs[job_id] = {
+            "job_id": job_id,
+            "doi": request.doi,
+            "status": "queued",
+            "stage": None,
+            "paper_id": None,
+            "error": None,
+            "created_at": _time.time(),
+        }
+    background_tasks.add_task(_run_doi_analysis_tracked, job_id, request.doi, request.priority)
+    return {"job_id": job_id, "doi": request.doi, "status": "queued"}
+
+
+@app.get("/v1/papers/analyze/{job_id}")
+def get_analyze_job(job_id: str):
+    """Poll status of a DOI analysis job."""
+    with _jobs_lock:
+        job = _analyze_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job
+
+
+def _run_doi_analysis_tracked(job_id: str, doi: str, priority: int = 1) -> None:
+    """Background task with stage tracking."""
+    def _update(stage: str, status: str = "running", paper_id=None, error=None):
+        with _jobs_lock:
+            if job_id in _analyze_jobs:
+                _analyze_jobs[job_id].update({"stage": stage, "status": status})
+                if paper_id:
+                    _analyze_jobs[job_id]["paper_id"] = paper_id
+                if error:
+                    _analyze_jobs[job_id]["error"] = error
+
+    try:
+        _update("fetching")
+        from decoded.api.analysis_worker import AnalysisWorker
+        worker = AnalysisWorker()
+
+        # Check if already in DB
+        conn = get_db()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("SELECT id, status FROM raw_papers WHERE doi = %s LIMIT 1", (doi,))
+        existing = cur.fetchone()
+        conn.close()
+
+        if existing:
+            paper_id = str(existing["id"])
+            _update("already_ingested", paper_id=paper_id)
+        else:
+            _update("fetching")
+
+        _update("extracting")
+        result = worker.analyze_doi(doi, priority=priority)
+        paper_id = result.get("paper_id") if result else None
+        _update("done", status="complete", paper_id=paper_id)
+    except Exception as exc:
+        logger.error("Tracked DOI analysis failed for %s: %s", doi, exc, exc_info=True)
+        _update("error", status="failed", error=str(exc)[:200])
+
+
+# ---------------------------------------------------------------------------
+# v1/convergences — convergence zones with convergent claims (Step 7)
+# ---------------------------------------------------------------------------
+
+@app.get("/v1/convergences")
+def get_convergences_v1(
+    min_confidence: float = Query(0.7),
+    limit: int = Query(20, le=100),
+):
+    """Convergence zones with convergent claim text from shared entities."""
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute(
+        """
+        SELECT p.id, p.title, p.doi, p.journal,
+               COUNT(DISTINCT dc.id) as connection_count,
+               AVG(dc.confidence) as avg_confidence,
+               ARRAY_AGG(DISTINCT dc.connection_type) as connection_types,
+               ARRAY_AGG(DISTINCT dc.description ORDER BY dc.description) as descriptions
+        FROM raw_papers p
+        JOIN discovered_connections dc
+            ON dc.paper_a_id = p.id OR dc.paper_b_id = p.id
+        WHERE dc.confidence >= %s AND dc.connection_type != 'replicates'
+        GROUP BY p.id, p.title, p.doi, p.journal
+        HAVING COUNT(DISTINCT dc.id) >= 2
+        ORDER BY connection_count DESC, avg_confidence DESC
+        LIMIT %s
+        """,
+        (min_confidence, limit),
+    )
+    rows = [_jsonify_row(dict(r)) for r in cur.fetchall()]
+
+    # Enrich with convergent claim text
+    for row in rows:
+        paper_id = row["id"]
+        # Get papers connected to this one
+        cur.execute(
+            """
+            SELECT DISTINCT
+                CASE WHEN dc.paper_a_id = %s THEN dc.paper_b_id ELSE dc.paper_a_id END as other_id,
+                dc.connection_type, dc.description, dc.confidence
+            FROM discovered_connections dc
+            WHERE (dc.paper_a_id = %s OR dc.paper_b_id = %s)
+              AND dc.confidence >= %s
+              AND dc.connection_type != 'replicates'
+            ORDER BY dc.confidence DESC
+            LIMIT 5
+            """,
+            (paper_id, paper_id, paper_id, min_confidence),
+        )
+        connected = [dict(r) for r in cur.fetchall()]
+        row["connected_papers"] = connected
+
+        # Find shared claims/entities as convergent claim
+        if connected:
+            other_ids = [str(r["other_id"]) for r in connected]
+            # Get key findings from center paper
+            cur.execute(
+                "SELECT key_findings FROM extraction_results WHERE paper_id = %s LIMIT 1",
+                (str(paper_id),),
+            )
+            ef = cur.fetchone()
+            row["convergent_claim"] = None
+            if ef and ef["key_findings"]:
+                kf = ef["key_findings"]
+                if isinstance(kf, str):
+                    try:
+                        kf = json.loads(kf)
+                    except Exception:
+                        kf = kf
+                if isinstance(kf, list) and kf:
+                    row["convergent_claim"] = kf[0] if isinstance(kf[0], str) else str(kf[0])
+                elif isinstance(kf, str) and kf:
+                    row["convergent_claim"] = kf[:200]
+
+    conn.close()
+    return {"convergences": rows, "count": len(rows)}
 
 
 # ---------------------------------------------------------------------------
