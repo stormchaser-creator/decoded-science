@@ -13,6 +13,17 @@
  * Save:   pm2 save
  */
 
+// Read secrets from .env at config load time (file is gitignored)
+const fs = require('fs');
+const path = require('path');
+const _env = {};
+try {
+  fs.readFileSync(path.join(__dirname, '.env'), 'utf8').split('\n').forEach(line => {
+    const m = line.match(/^([^#=\s][^=]*)=(.*)$/);
+    if (m) _env[m[1].trim()] = m[2].trim();
+  });
+} catch (_) {}
+
 module.exports = {
   apps: [
     {
@@ -52,6 +63,7 @@ module.exports = {
         NEO4J_URI: 'bolt://localhost:7687',
         NEO4J_USER: 'neo4j',
         REDIS_URL: 'redis://localhost:6379/0',
+        ANTHROPIC_API_KEY: _env.ANTHROPIC_API_KEY || '',
       },
       autorestart: true,
       max_restarts: 50,
@@ -76,6 +88,7 @@ module.exports = {
         NEO4J_URI: 'bolt://localhost:7687',
         NEO4J_USER: 'neo4j',
         REDIS_URL: 'redis://localhost:6379/0',
+        ANTHROPIC_API_KEY: _env.ANTHROPIC_API_KEY || '',
       },
       autorestart: true,
       max_restarts: 20,
