@@ -5,7 +5,7 @@
       "name": "decoded-explorer",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev"],
-      "cwd": "/Users/whit/Projects/Decoded/explorer",
+      "cwd": "explorer",
       "port": 5173
     },
     {
