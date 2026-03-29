@@ -36,14 +36,14 @@ class AnalysisWorker:
     """On-demand analysis pipeline for a single DOI."""
 
     def analyze_doi(self, doi: str, priority: int = 0) -> dict:
-        """Full pipeline: fetch → extract → graph → connect.
+        """Full pipeline: fetch → extract → find corpus connections → generate brief.
 
-        Returns a summary of what was done.
+        Returns rich intelligence report dict.
         """
         conn = get_db_conn()
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
-        # Check if already in DB
+        # ── Step 1: Fetch and store ──────────────────────────────────────────
         cur.execute(
             "SELECT id, status, abstract, full_text, sections FROM raw_papers WHERE doi = %s LIMIT 1",
             (doi,),
@@ -55,11 +55,8 @@ class AnalysisWorker:
                 existing["abstract"] or existing["full_text"] or
                 (existing["sections"] and existing["sections"] != {})
             )
-            if has_content:
-                logger.info("DOI %s already in DB with content (status: %s)", doi, existing["status"])
-            else:
-                # Paper is in DB but has no content — re-run fetch to try scraping
-                logger.info("DOI %s in DB but no content, re-fetching...", doi)
+            if not has_content:
+                logger.info("DOI %s in DB but no content — re-fetching", doi)
                 paper_id = self._fetch_and_store(conn, doi) or paper_id
         else:
             paper_id = self._fetch_and_store(conn, doi)
@@ -67,58 +64,95 @@ class AnalysisWorker:
         if not paper_id:
             return {"status": "error", "message": f"Could not fetch DOI: {doi}"}
 
-        result = {"doi": doi, "paper_id": paper_id, "steps": []}
-
-        # Extract if not already done
+        # ── Step 2: Extract if needed ────────────────────────────────────────
         cur.execute("SELECT id FROM extraction_results WHERE paper_id = %s", (paper_id,))
-        if not cur.fetchone():
-            # Check if there is any content to extract
-            cur.execute(
-                "SELECT abstract, full_text, sections FROM raw_papers WHERE id = %s",
-                (paper_id,),
-            )
+        already_extracted = bool(cur.fetchone())
+
+        if not already_extracted:
+            cur.execute("SELECT abstract, full_text, sections FROM raw_papers WHERE id = %s", (paper_id,))
             content_row = cur.fetchone()
             has_content = bool(
                 content_row and (
-                    content_row["abstract"] or
-                    content_row["full_text"] or
+                    content_row["abstract"] or content_row["full_text"] or
                     (content_row["sections"] and content_row["sections"] != {})
                 )
             )
             if not has_content:
+                conn.close()
                 return {
-                    "doi": doi,
-                    "paper_id": paper_id,
-                    "status": "error",
-                    "message": "No content found for this paper. "
-                               "Tried CrossRef, Semantic Scholar, PubMed, and the publisher page. "
-                               "The paper may be behind a paywall with no open-access version.",
-                    "steps": [],
+                    "doi": doi, "paper_id": paper_id, "status": "error",
+                    "message": "No content found for this paper. Tried CrossRef, Semantic Scholar, "
+                               "PubMed, and the publisher page. The paper may be paywalled.",
                 }
             try:
                 self._extract(conn, paper_id)
-                result["steps"].append("extracted")
             except Exception as exc:
                 logger.error("Extraction failed for %s: %s", paper_id, exc)
-                result["steps"].append(f"extraction_error: {exc}")
 
-        # Add to graph
-        try:
-            self._add_to_graph(conn, paper_id)
-            result["steps"].append("graph_updated")
-        except Exception as exc:
-            logger.error("Graph update failed for %s: %s", paper_id, exc)
+        # ── Step 3: Find corpus connections (pure SQL) ───────────────────────
+        candidates = self._find_corpus_connections(conn, paper_id, limit=15)
+        logger.info("Found %d corpus candidates for %s", len(candidates), paper_id[:8])
 
-        # Quick connection discovery against existing papers
-        try:
-            n_connections = self._discover_connections(conn, paper_id)
-            result["steps"].append(f"connections_found: {n_connections}")
-        except Exception as exc:
-            logger.error("Connection discovery failed: %s", exc)
+        # ── Step 4: LLM-classify top connections ─────────────────────────────
+        cur.execute("""
+            SELECT p.title, p.abstract, p.journal, p.doi, p.published_date,
+                   e.key_findings, e.entities, e.claims, e.study_design
+            FROM raw_papers p
+            JOIN extraction_results e ON e.paper_id = p.id
+            WHERE p.id = %s
+        """, (paper_id,))
+        paper_data = dict(cur.fetchone() or {})
+
+        connections = self._llm_classify_connections(paper_id, paper_data, candidates)
+        logger.info("Classified %d connections for %s", len(connections), paper_id[:8])
+
+        # Persist connections to discovered_connections table
+        self._store_connections(conn, paper_id, connections)
+
+        # ── Step 5: Generate intelligence brief with corpus context ──────────
+        brief = self._generate_intelligence_brief(conn, paper_id, connections)
 
         conn.close()
-        result["status"] = "complete"
-        return result
+
+        return {
+            "status": "complete",
+            "doi": doi,
+            "paper_id": paper_id,
+            "connections": connections,
+            "connection_count": len(connections),
+            "brief": brief,
+        }
+
+    def _store_connections(self, conn, paper_id: str, connections: list[dict]) -> None:
+        """Persist LLM-classified connections to discovered_connections."""
+        import json as _json
+        cur = conn.cursor()
+        for c in connections:
+            other_id = c.get("paper_id")
+            if not other_id:
+                continue
+            # Canonical ordering
+            a_id, b_id = sorted([paper_id, other_id])
+            try:
+                cur.execute("""
+                    INSERT INTO discovered_connections
+                        (id, paper_a_id, paper_b_id, connection_type, description,
+                         confidence, shared_entities, novelty_score, model_id, created_at)
+                    VALUES (gen_random_uuid(), %s, %s, %s, %s, %s, %s, %s, 'claude-haiku-4-5-20251001', NOW())
+                    ON CONFLICT (paper_a_id, paper_b_id, connection_type) DO UPDATE SET
+                        description = EXCLUDED.description,
+                        confidence = EXCLUDED.confidence
+                """, (
+                    a_id, b_id,
+                    c.get("connection_type", "convergent_evidence"),
+                    c.get("description", ""),
+                    c.get("confidence", 0.5),
+                    _json.dumps(c.get("shared_concepts", [])),
+                    0.5,
+                ))
+            except Exception as exc:
+                logger.debug("Store connection failed: %s", exc)
+        conn.commit()
 
     def _fetch_and_store(self, conn, doi: str) -> str | None:
         """Fetch paper metadata from CrossRef + Semantic Scholar fallback and store it."""
@@ -330,16 +364,261 @@ class AnalysisWorker:
         worker = ExtractionWorker(limit=1, paper_id=paper_id)
         worker.run()
 
-    def _add_to_graph(self, conn, paper_id: str) -> None:
-        """Add paper to Neo4j graph."""
-        from decoded.graph.worker import GraphWorker
-        worker = GraphWorker(paper_id=paper_id, sync_connections=False)
-        worker.run()
+    def _find_corpus_connections(self, conn, paper_id: str, limit: int = 15) -> list[dict]:
+        """Find related papers in the corpus via entity + claim overlap (pure SQL, no Neo4j).
 
-    def _discover_connections(self, conn, paper_id: str) -> int:
-        """Quick connection discovery for this paper against existing papers."""
-        from decoded.connect.graph_discovery import GraphDiscovery
-        gd = GraphDiscovery()
-        shared = gd.find_shared_entities(min_shared=1, limit=10)
-        gd.close()
-        return len([c for c in shared if c.get("paper_a_id") == paper_id or c.get("paper_b_id") == paper_id])
+        Returns list of candidate connection dicts ranked by overlap score.
+        """
+        import json as _json
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+        # Get this paper's extracted entities and claims
+        cur.execute("""
+            SELECT e.entities, e.claims, e.mechanisms, e.key_findings,
+                   p.title, p.abstract, p.journal
+            FROM extraction_results e
+            JOIN raw_papers p ON p.id = e.paper_id
+            WHERE e.paper_id = %s
+        """, (paper_id,))
+        row = cur.fetchone()
+        if not row:
+            return []
+
+        # Collect entity texts for matching
+        entities = row["entities"] or []
+        if isinstance(entities, str):
+            entities = _json.loads(entities)
+        entity_texts = list({
+            e.get("text", "").lower()
+            for e in entities
+            if e.get("text") and len(e.get("text", "")) > 3
+        })[:30]
+
+        # Collect claim subjects/objects for matching
+        claims = row["claims"] or []
+        if isinstance(claims, str):
+            claims = _json.loads(claims)
+        claim_terms = list({
+            term.lower()
+            for c in claims
+            for term in [c.get("subject", ""), c.get("object", "")]
+            if term and len(term) > 3
+        })[:20]
+
+        if not entity_texts and not claim_terms:
+            return []
+
+        all_terms = list(set(entity_texts + claim_terms))[:40]
+
+        # Full-text search across extraction_results for papers with overlapping content
+        # Build a tsquery from most specific terms
+        ts_terms = [t.replace("'", "''") for t in all_terms if len(t) > 4][:15]
+        if not ts_terms:
+            return []
+
+        tsquery = " | ".join(f"'{t}':*" for t in ts_terms)
+
+        cur.execute("""
+            SELECT
+                p.id, p.title, p.journal, p.published_date, p.doi,
+                e.entities, e.claims, e.mechanisms, e.key_findings, e.study_design,
+                ts_rank(p.search_vector, to_tsquery('english', %s)) AS rank
+            FROM raw_papers p
+            JOIN extraction_results e ON e.paper_id = p.id
+            WHERE p.id != %s
+              AND p.search_vector @@ to_tsquery('english', %s)
+              AND p.status IN ('extracted', 'parsed')
+            ORDER BY rank DESC
+            LIMIT %s
+        """, (tsquery, paper_id, tsquery, limit * 2))
+
+        candidates = cur.fetchall()
+        if not candidates:
+            return []
+
+        # Score by entity overlap
+        scored = []
+        for c in candidates:
+            c_entities = c["entities"] or []
+            if isinstance(c_entities, str):
+                c_entities = _json.loads(c_entities)
+            c_entity_texts = {e.get("text", "").lower() for e in c_entities if e.get("text")}
+            overlap = len(set(entity_texts) & c_entity_texts)
+            scored.append((overlap, float(c["rank"]), dict(c)))
+
+        scored.sort(key=lambda x: (x[0], x[1]), reverse=True)
+        return [s[2] for s in scored[:limit]]
+
+    def _llm_classify_connections(self, paper_id: str, paper_data: dict, candidates: list[dict]) -> list[dict]:
+        """Use Claude to classify connection type and generate descriptions for top candidates."""
+        import json as _json
+        import anthropic
+
+        if not candidates:
+            return []
+
+        client = anthropic.Anthropic()
+        connections = []
+
+        paper_abstract = (paper_data.get("abstract") or "")[:600]
+        paper_findings = paper_data.get("key_findings") or []
+        if isinstance(paper_findings, str):
+            paper_findings = _json.loads(paper_findings)
+
+        for cand in candidates[:8]:  # classify up to 8
+            cand_abstract = (cand.get("abstract") or "")[:400]
+            cand_findings = cand.get("key_findings") or []
+            if isinstance(cand_findings, str):
+                cand_findings = _json.loads(cand_findings)
+            cand_entities = cand.get("entities") or []
+            if isinstance(cand_entities, str):
+                cand_entities = _json.loads(cand_entities)
+            shared_entities = [
+                e.get("text") for e in cand_entities
+                if e.get("text") and any(
+                    e.get("text", "").lower() in term
+                    for term in [paper_abstract.lower()]
+                )
+            ][:5]
+
+            prompt = f"""Compare these two scientific papers and classify their relationship.
+
+PAPER A (submitted for analysis):
+Title: {paper_data.get('title', '')}
+Abstract: {paper_abstract}
+Key findings: {'; '.join(str(f) for f in paper_findings[:3])}
+
+PAPER B (from corpus):
+Title: {cand.get('title', '')}
+Journal: {cand.get('journal', '')}
+Abstract: {cand_abstract}
+Key findings: {'; '.join(str(f) for f in cand_findings[:3])}
+
+Classify their relationship. Return JSON only:
+{{
+  "connection_type": "supports|contradicts|extends|mechanism_for|convergent_evidence|methodological_parallel",
+  "confidence": 0.0-1.0,
+  "description": "One sentence: how specifically does Paper B relate to Paper A's claims?",
+  "shared_concepts": ["concept1", "concept2"],
+  "novelty_note": "One sentence: what does Paper A add that Paper B does not cover?"
+}}
+
+connection_type meanings:
+- supports: B provides evidence that supports A's claims
+- contradicts: B has findings that conflict with A
+- extends: A builds on or goes further than B
+- mechanism_for: B explains the mechanism behind A's finding
+- convergent_evidence: different methods, same conclusion
+- methodological_parallel: similar approach, different question
+
+Return only JSON."""
+
+            try:
+                msg = client.messages.create(
+                    model="claude-haiku-4-5-20251001",
+                    max_tokens=300,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                raw = msg.content[0].text.strip()
+                # Strip markdown fences if present
+                if raw.startswith("```"):
+                    raw = raw.split("```")[1]
+                    if raw.startswith("json"):
+                        raw = raw[4:]
+                classified = _json.loads(raw)
+                connections.append({
+                    "paper_id": str(cand["id"]),
+                    "title": cand.get("title", ""),
+                    "journal": cand.get("journal", ""),
+                    "doi": cand.get("doi"),
+                    "published_date": str(cand.get("published_date", "")),
+                    "study_design": cand.get("study_design"),
+                    "connection_type": classified.get("connection_type", "convergent_evidence"),
+                    "confidence": float(classified.get("confidence", 0.5)),
+                    "description": classified.get("description", ""),
+                    "shared_concepts": classified.get("shared_concepts", []),
+                    "novelty_note": classified.get("novelty_note", ""),
+                    # for critique generator compat
+                    "connected_paper_title": cand.get("title", ""),
+                })
+            except Exception as exc:
+                logger.debug("LLM classify failed for candidate %s: %s", cand.get("id"), exc)
+
+        return connections
+
+    def _generate_intelligence_brief(self, conn, paper_id: str, connections: list[dict]) -> dict | None:
+        """Generate or regenerate the intelligence brief with corpus context."""
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute("""
+                SELECT p.*, e.study_design, e.sample_size, e.population,
+                       e.intervention, e.primary_outcome, e.key_findings,
+                       e.entities, e.claims, e.mechanisms
+                FROM raw_papers p
+                JOIN extraction_results e ON e.paper_id = p.id
+                WHERE p.id = %s
+            """, (paper_id,))
+            paper = cur.fetchone()
+            if not paper:
+                return None
+
+            from decoded.critique.generator import CritiqueGenerator
+            gen = CritiqueGenerator()
+            critique = gen.generate(dict(paper), connections)
+
+            # Upsert critique
+            import json as _json
+            cur.execute("""
+                INSERT INTO paper_critiques
+                    (id, paper_id, model_id, overall_quality, methodology_score,
+                     reproducibility_score, novelty_score, statistical_rigor,
+                     strengths, weaknesses, red_flags, summary, recommendation,
+                     prompt_tokens, completion_tokens, cost_usd, created_at)
+                VALUES (gen_random_uuid(), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                ON CONFLICT (paper_id, model_id) DO UPDATE SET
+                    overall_quality = EXCLUDED.overall_quality,
+                    methodology_score = EXCLUDED.methodology_score,
+                    reproducibility_score = EXCLUDED.reproducibility_score,
+                    novelty_score = EXCLUDED.novelty_score,
+                    statistical_rigor = EXCLUDED.statistical_rigor,
+                    strengths = EXCLUDED.strengths,
+                    weaknesses = EXCLUDED.weaknesses,
+                    red_flags = EXCLUDED.red_flags,
+                    summary = EXCLUDED.summary,
+                    recommendation = EXCLUDED.recommendation,
+                    prompt_tokens = EXCLUDED.prompt_tokens,
+                    completion_tokens = EXCLUDED.completion_tokens,
+                    cost_usd = EXCLUDED.cost_usd
+            """, (
+                paper_id,
+                critique.model_id,
+                critique.overall_quality,
+                critique.methodology_score,
+                critique.reproducibility_score,
+                critique.novelty_score,
+                critique.statistical_rigor,
+                _json.dumps(critique.strengths),
+                _json.dumps(critique.weaknesses),
+                _json.dumps(critique.red_flags),
+                critique.summary,
+                critique.recommendation,
+                critique.prompt_tokens,
+                critique.completion_tokens,
+                critique.cost_usd,
+            ))
+            conn.commit()
+            return {
+                "overall_quality": critique.overall_quality,
+                "methodology_score": critique.methodology_score,
+                "reproducibility_score": critique.reproducibility_score,
+                "novelty_score": critique.novelty_score,
+                "statistical_rigor": critique.statistical_rigor,
+                "strengths": critique.strengths,
+                "weaknesses": critique.weaknesses,
+                "red_flags": critique.red_flags,
+                "summary": critique.summary,
+                "recommendation": critique.recommendation,
+            }
+        except Exception as exc:
+            logger.error("Brief generation failed for %s: %s", paper_id, exc)
+            return None
