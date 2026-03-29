@@ -1201,6 +1201,14 @@ def stats_v1():
     cur.execute("SELECT count(*) as n FROM field_gaps")
     field_gaps_count = cur.fetchone()["n"]
 
+    # Data quality coverage
+    cur.execute("SELECT count(*) as n FROM raw_papers WHERE data_source LIKE 'full_text%'")
+    full_text_count = cur.fetchone()["n"]
+    full_text_pct = round(full_text_count / max(total_papers, 1) * 100, 1)
+
+    cur.execute("SELECT count(*) as n FROM paper_critiques WHERE brief_confidence = 'high'")
+    high_confidence_briefs = cur.fetchone()["n"]
+
     cur.execute("SELECT connection_type, count(*) as n FROM discovered_connections WHERE connection_type != 'replicates' GROUP BY connection_type ORDER BY n DESC")
     connection_types = {r["connection_type"]: r["n"] for r in cur.fetchall()}
 
@@ -1232,6 +1240,11 @@ def stats_v1():
         "convergence_zones": convergence_zones,
         "field_gaps": field_gaps_count,
         "graph": {"nodes": graph_nodes, "relationships": graph_relationships},
+        "data_quality": {
+            "full_text_papers": full_text_count,
+            "full_text_pct": full_text_pct,
+            "high_confidence_briefs": high_confidence_briefs,
+        },
     }
     # Cache for 60 seconds
     if _redis:

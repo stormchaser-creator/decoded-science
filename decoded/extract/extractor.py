@@ -163,34 +163,38 @@ class PaperExtractor:
             if el.text and el.text.strip()
         ]
 
-        # Entities
+        # Entities (with LLM-provided confidence)
         result["entities"] = []
         for el in root.findall(".//entities/entity"):
             etype = el.get("type", "unknown")
+            conf = el.get("confidence", "0.5")
             name = el.text.strip() if el.text else ""
             if name:
-                result["entities"].append({"type": etype, "text": name})
+                result["entities"].append({"type": etype, "text": name, "confidence": conf})
 
-        # Claims
+        # Claims (with LLM-provided confidence)
         result["claims"] = []
         for el in root.findall(".//claims/claim"):
             claim_type = el.get("type", "descriptive")
             strength = el.get("strength", "moderate")
+            conf = el.get("confidence", "0.5")
             text_val = el.text.strip() if el.text else ""
             if text_val:
                 result["claims"].append({
                     "type": claim_type,
                     "strength": strength,
                     "text": text_val,
+                    "confidence": conf,
                 })
 
-        # Mechanisms
+        # Mechanisms (with LLM-provided confidence)
         result["mechanisms"] = []
         for el in root.findall(".//mechanisms/mechanism"):
             desc_el = el.find("description")
             up_el = el.find("upstream")
             down_el = el.find("downstream")
             int_el = el.find("interaction")
+            conf = el.get("confidence", "0.5")
             desc = desc_el.text.strip() if desc_el is not None and desc_el.text else ""
             if desc:
                 result["mechanisms"].append({
@@ -198,6 +202,7 @@ class PaperExtractor:
                     "upstream": up_el.text.strip() if up_el is not None and up_el.text else None,
                     "downstream": down_el.text.strip() if down_el is not None and down_el.text else None,
                     "interaction": int_el.text.strip() if int_el is not None and int_el.text else None,
+                    "confidence": conf,
                 })
 
         # Methods
@@ -255,35 +260,35 @@ class PaperExtractor:
             except (ValueError, TypeError):
                 pass
 
-        # Entities
+        # Entities — use LLM-provided confidence, fallback to 0.5
         entities = [
             ExtractedEntity(
                 text=e["text"],
                 entity_type=e.get("type", "unknown"),
-                confidence=0.85,
+                confidence=min(1.0, max(0.0, float(e.get("confidence", 0.5)))),
             )
             for e in parsed.get("entities", [])
         ]
 
-        # Claims
+        # Claims — use LLM-provided confidence, fallback to 0.5
         claims = [
             ExtractedClaim(
                 text=c["text"],
                 claim_type=c.get("type", "descriptive"),
                 evidence_strength=c.get("strength", "moderate"),
-                confidence=0.8,
+                confidence=min(1.0, max(0.0, float(c.get("confidence", 0.5)))),
             )
             for c in parsed.get("claims", [])
         ]
 
-        # Mechanisms
+        # Mechanisms — use LLM-provided confidence, fallback to 0.5
         mechanisms = [
             ExtractedMechanism(
                 description=m["description"],
                 upstream_entity=m.get("upstream"),
                 downstream_entity=m.get("downstream"),
                 interaction_type=m.get("interaction"),
-                confidence=0.75,
+                confidence=min(1.0, max(0.0, float(m.get("confidence", 0.5)))),
             )
             for m in parsed.get("mechanisms", [])
         ]

@@ -48,36 +48,45 @@ class CritiqueSelector:
                     p.journal,
                     p.published_date,
                     p.status,
+                    p.data_source,
                     -- Connection score
                     COUNT(DISTINCT dc.id) AS connection_count,
                     -- Extraction richness
                     COALESCE(jsonb_array_length(e.entities), 0) AS entity_count,
                     COALESCE(jsonb_array_length(e.claims), 0) AS claim_count,
                     COALESCE(jsonb_array_length(e.key_findings), 0) AS finding_count,
+                    COALESCE(e.extraction_completeness, 0) AS extraction_completeness,
                     e.study_design,
                     e.population,
                     e.primary_outcome,
                     e.key_findings,
                     -- Has extraction?
                     (e.id IS NOT NULL) AS has_extraction,
-                    -- Impact score
-                    (COUNT(DISTINCT dc.id) * 3
-                     + COALESCE(jsonb_array_length(e.entities), 0)
-                     + COALESCE(jsonb_array_length(e.claims), 0)) AS impact_score
+                    -- Impact score: heavily weight data quality over connections
+                    (COUNT(DISTINCT dc.id) * 2
+                     + COALESCE(jsonb_array_length(e.entities), 0) * 2
+                     + COALESCE(jsonb_array_length(e.claims), 0) * 2
+                     + CASE WHEN p.data_source LIKE 'full_text%%' THEN 25 ELSE 0 END
+                     + CASE WHEN COALESCE(e.extraction_completeness, 0) >= 0.5 THEN 10 ELSE 0 END
+                    ) AS impact_score
                 FROM raw_papers p
                 LEFT JOIN extraction_results e ON e.paper_id = p.id
                 LEFT JOIN discovered_connections dc
                     ON dc.paper_a_id = p.id OR dc.paper_b_id = p.id
                 WHERE p.title IS NOT NULL
                   AND p.status NOT IN ('error', 'skipped', 'queued')
+                  AND e.id IS NOT NULL
+                  AND COALESCE(jsonb_array_length(e.entities), 0) >= 3
+                  AND COALESCE(jsonb_array_length(e.claims), 0) >= 2
                   AND NOT EXISTS (
                       SELECT 1 FROM paper_critiques pc
                       WHERE pc.paper_id = p.id AND pc.model_id = %s
                   )
                 GROUP BY p.id, p.title, p.abstract, p.authors, p.doi, p.journal,
-                         p.published_date, p.status,
+                         p.published_date, p.status, p.data_source,
                          e.id, e.entities, e.claims, e.key_findings,
-                         e.study_design, e.population, e.primary_outcome
+                         e.study_design, e.population, e.primary_outcome,
+                         e.extraction_completeness
                 HAVING COUNT(DISTINCT dc.id) >= %s
             )
             SELECT *

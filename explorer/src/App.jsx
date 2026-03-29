@@ -1,6 +1,7 @@
-import React, { useState, useEffect, Suspense } from 'react'
+import React, { useState, useEffect, Suspense, lazy } from 'react'
 import { BrowserRouter, Routes, Route, Link, NavLink, useNavigate } from 'react-router-dom'
 import { API, s, useIsMobile } from './shared.js'
+import SEO from './components/SEO.jsx'
 
 const ForceGraph2D = React.lazy(() => import('react-force-graph-2d'))
 
@@ -11,19 +12,25 @@ const DISCIPLINE_COLORS_BG = {
 import { AuthProvider, useAuth } from './auth.jsx'
 import { navLinkStyle } from './components/ui.jsx'
 
-import PapersPage from './pages/PapersPage.jsx'
-import PaperDetailPage from './pages/PaperDetailPage.jsx'
-import ConnectionsPage from './pages/ConnectionsPage.jsx'
-import ConvergencesPage from './pages/ConvergencesPage.jsx'
-import GapsPage from './pages/GapsPage.jsx'
-import BriefsPage from './pages/BriefsPage.jsx'
-import BridgePage from './pages/BridgePage.jsx'
-import AnalyzePage from './pages/AnalyzePage.jsx'
-import ExplorePage from './pages/ExplorePage.jsx'
-import WorkspacePage from './pages/WorkspacePage.jsx'
-import { LoginPage, RegisterPage } from './pages/AuthPages.jsx'
-import AboutPage from './pages/AboutPage.jsx'
-import FAQPage from './pages/FAQPage.jsx'
+// Lazy-load all page components for code splitting
+const PapersPage = lazy(() => import('./pages/PapersPage.jsx'))
+const PaperDetailPage = lazy(() => import('./pages/PaperDetailPage.jsx'))
+const ConnectionsPage = lazy(() => import('./pages/ConnectionsPage.jsx'))
+const ConvergencesPage = lazy(() => import('./pages/ConvergencesPage.jsx'))
+const GapsPage = lazy(() => import('./pages/GapsPage.jsx'))
+const BriefsPage = lazy(() => import('./pages/BriefsPage.jsx'))
+const BridgePage = lazy(() => import('./pages/BridgePage.jsx'))
+const AnalyzePage = lazy(() => import('./pages/AnalyzePage.jsx'))
+const ExplorePage = lazy(() => import('./pages/ExplorePage.jsx'))
+const WorkspacePage = lazy(() => import('./pages/WorkspacePage.jsx'))
+const LoginPage = lazy(() => import('./pages/AuthPages.jsx').then(m => ({ default: m.LoginPage })))
+const RegisterPage = lazy(() => import('./pages/AuthPages.jsx').then(m => ({ default: m.RegisterPage })))
+const AboutPage = lazy(() => import('./pages/AboutPage.jsx'))
+const FAQPage = lazy(() => import('./pages/FAQPage.jsx'))
+
+function PageLoader() {
+  return <div style={{ ...s.page, display: 'flex', justifyContent: 'center', paddingTop: '120px', color: '#6b7280', fontSize: '14px' }}>Loading…</div>
+}
 
 // ---------------------------------------------------------------------------
 // Home page
@@ -92,6 +99,34 @@ function HomePage({ stats, featuredBriefs, graphData }) {
   const isMobile = useIsMobile()
   return (
     <div style={{ ...s.page, paddingTop: isMobile ? '24px' : '48px', position: 'relative' }}>
+      <SEO
+        description="The Decoded Human builds an AI-powered knowledge graph that discovers hidden connections across scientific literature. Explore convergences, contradictions, and field gaps across neuroscience and beyond."
+        path="/"
+        schema={{
+          "@context": "https://schema.org",
+          "@type": "WebApplication",
+          "name": "The Decoded Human",
+          "alternateName": "Literature Connectome Explorer",
+          "url": "https://thedecodedhuman.com",
+          "description": "AI-powered knowledge graph discovering hidden connections across scientific literature",
+          "applicationCategory": "Research Tool",
+          "operatingSystem": "Web",
+          "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+          "creator": {
+            "@type": "Organization",
+            "name": "The Encoded Human Project",
+            "url": "https://theencodedhumanproject.com"
+          },
+          "featureList": [
+            "AI-powered entity and claim extraction from research papers",
+            "Cross-disciplinary knowledge graph",
+            "Convergence cluster detection",
+            "Bridge query hypothesis generation",
+            "Automated intelligence briefs",
+            "Field gap analysis"
+          ]
+        }}
+      />
       {!isMobile && <BackgroundGraph graphData={graphData} />}
       <div style={{ position: 'relative', zIndex: 1 }}>
       <div style={{ textAlign: 'center', maxWidth: '600px', margin: `0 auto ${isMobile ? '32px' : '48px'}` }}>
@@ -104,9 +139,10 @@ function HomePage({ stats, featuredBriefs, graphData }) {
         </p>
       </div>
       {stats && (
-        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(4, 1fr)', gap: isMobile ? '10px' : '16px', marginBottom: isMobile ? '24px' : '48px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(5, 1fr)', gap: isMobile ? '10px' : '16px', marginBottom: isMobile ? '24px' : '48px' }}>
           {[
             { label: 'Total Papers', value: stats.papers?.total?.toLocaleString(), color: '#7c6af7' },
+            { label: 'Full Text', value: stats.data_quality?.full_text_pct ? `${stats.data_quality.full_text_pct}%` : '—', color: '#10b981' },
             { label: 'Connections', value: stats.connections?.total?.toLocaleString(), color: '#fbbf24' },
             { label: 'Claims Extracted', value: stats.claims?.toLocaleString(), color: '#4ade80' },
             { label: 'Intelligence Briefs', value: stats.critiques?.toLocaleString(), color: '#60a5fa' },
@@ -262,24 +298,26 @@ function AppInner({ stats, featuredBriefs, graphData }) {
   return (
     <div style={s.app}>
       <Header stats={stats} />
-      <Routes>
-        <Route path="/" element={<HomePage stats={stats} featuredBriefs={featuredBriefs} graphData={graphData} />} />
-        <Route path="/papers" element={<PapersPage />} />
-        <Route path="/papers/:id" element={<PaperDetailPage />} />
-        <Route path="/paper/:id" element={<PaperDetailPage />} />
-        <Route path="/connections" element={<ConnectionsPage />} />
-        <Route path="/convergences" element={<ConvergencesPage />} />
-        <Route path="/gaps" element={<GapsPage />} />
-        <Route path="/briefs" element={<BriefsPage />} />
-        <Route path="/bridge" element={<BridgePage />} />
-        <Route path="/analyze" element={<AnalyzePage />} />
-        <Route path="/explore" element={<ExplorePage />} />
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/register" element={<RegisterPage />} />
-        <Route path="/workspace" element={<WorkspacePage />} />
-        <Route path="/about" element={<AboutPage />} />
-        <Route path="/faq" element={<FAQPage />} />
-      </Routes>
+      <Suspense fallback={<PageLoader />}>
+        <Routes>
+          <Route path="/" element={<HomePage stats={stats} featuredBriefs={featuredBriefs} graphData={graphData} />} />
+          <Route path="/papers" element={<PapersPage />} />
+          <Route path="/papers/:id" element={<PaperDetailPage />} />
+          <Route path="/paper/:id" element={<PaperDetailPage />} />
+          <Route path="/connections" element={<ConnectionsPage />} />
+          <Route path="/convergences" element={<ConvergencesPage />} />
+          <Route path="/gaps" element={<GapsPage />} />
+          <Route path="/briefs" element={<BriefsPage />} />
+          <Route path="/bridge" element={<BridgePage />} />
+          <Route path="/analyze" element={<AnalyzePage />} />
+          <Route path="/explore" element={<ExplorePage />} />
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/register" element={<RegisterPage />} />
+          <Route path="/workspace" element={<WorkspacePage />} />
+          <Route path="/about" element={<AboutPage />} />
+          <Route path="/faq" element={<FAQPage />} />
+        </Routes>
+      </Suspense>
     </div>
   )
 }

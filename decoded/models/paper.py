@@ -212,6 +212,7 @@ class PaperCritique(BaseModel):
     red_flags: list[str] = Field(default_factory=list)
     summary: str
     recommendation: str  # "read", "skim", "skip", "replicate", "build_on"
+    brief_confidence: str = "unknown"  # "high", "medium", "low", "insufficient"
     prompt_tokens: int = 0
     completion_tokens: int = 0
     cost_usd: float = 0.0

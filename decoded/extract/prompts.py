@@ -26,19 +26,27 @@ def build_extraction_prompt(
         content_parts.append(f"\nABSTRACT:\n{abstract}")
 
     # Include sections if available (more structured than full text)
+    # Results section gets the most space — that's where the science lives
+    _section_limits = {
+        "introduction": 3000,
+        "methods": 5000,
+        "results": 8000,
+        "discussion": 4000,
+        "conclusion": 2000,
+    }
     if sections:
         for key in ["introduction", "methods", "results", "discussion", "conclusion"]:
             if key in sections:
                 text = sections[key]
-                # Truncate very long sections
-                if len(text) > 3000:
-                    text = text[:3000] + "... [truncated]"
+                limit = _section_limits.get(key, 3000)
+                if len(text) > limit:
+                    text = text[:limit] + "\n... [TRUNCATED — original section was " + str(len(text)) + " chars]"
                 content_parts.append(f"\n{key.upper()}:\n{text}")
     elif full_text:
-        # Fall back to first 6000 chars of full text
-        ft = full_text[:6000]
-        if len(full_text) > 6000:
-            ft += "... [truncated]"
+        # Fall back to first 12000 chars of full text
+        ft = full_text[:12000]
+        if len(full_text) > 12000:
+            ft += "\n... [TRUNCATED — original text was " + str(len(full_text)) + " chars]"
         content_parts.append(f"\nFULL TEXT (excerpt):\n{ft}")
 
     paper_content = "\n".join(content_parts)
@@ -66,17 +74,20 @@ Respond with ONLY this XML block (fill in all fields; use "unknown" if not deter
   </key_findings>
   <entities>
     <!-- Up to 15 key biological entities (genes, proteins, diseases, drugs, pathways, cell types) -->
-    <entity type="gene|protein|disease|drug|pathway|cell_type|organism|biomarker"><!-- name --></entity>
+    <!-- confidence: 0.9+ = explicitly named, 0.7-0.89 = clearly implied, 0.5-0.69 = inferred, <0.5 = uncertain -->
+    <entity type="gene|protein|disease|drug|pathway|cell_type|organism|biomarker" confidence="0.0-1.0"><!-- name --></entity>
   </entities>
   <claims>
     <!-- Up to 10 key scientific claims made in the paper -->
-    <claim type="causal|associative|null|mechanistic|descriptive" strength="strong|moderate|weak">
+    <!-- confidence: 0.9+ = directly stated with evidence, 0.7-0.89 = stated, 0.5-0.69 = implied, <0.5 = speculative -->
+    <claim type="causal|associative|null|mechanistic|descriptive" strength="strong|moderate|weak" confidence="0.0-1.0">
       <!-- claim text (one sentence) -->
     </claim>
   </claims>
   <mechanisms>
     <!-- Up to 5 biological mechanisms described -->
-    <mechanism>
+    <!-- confidence: 0.9+ = fully described, 0.7-0.89 = partially described, <0.7 = inferred -->
+    <mechanism confidence="0.0-1.0">
       <description><!-- brief mechanism description --></description>
       <upstream><!-- upstream entity/trigger, or null --></upstream>
       <downstream><!-- downstream entity/effect, or null --></downstream>

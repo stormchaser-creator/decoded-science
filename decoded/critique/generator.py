@@ -29,8 +29,66 @@ SYSTEM_PROMPT = """You are an expert scientific reviewer with deep expertise in 
 Your role is to produce rigorous, actionable Intelligence Briefs that help researchers quickly assess papers. Be direct, specific, and honest. Flag genuine red flags without hyperbole."""
 
 
+def _assess_data_quality(paper: dict) -> tuple[str, list[str], list[str]]:
+    """Assess what data we have and what's missing. Returns (level, available, missing)."""
+    available = []
+    missing = []
+
+    data_source = paper.get("data_source", "unknown")
+    if data_source.startswith("full_text"):
+        available.append("Full paper text")
+    elif data_source == "abstract_only":
+        missing.append("Full paper text (abstract only)")
+    else:
+        missing.append("Full paper text (unknown source)")
+
+    for field, label in [
+        ("study_design", "Study design"),
+        ("population", "Study population"),
+        ("primary_outcome", "Primary outcome"),
+    ]:
+        val = paper.get(field, "")
+        if val and val.lower() not in ("unknown", "", "null", "none"):
+            available.append(label)
+        else:
+            missing.append(label)
+
+    findings = paper.get("key_findings") or []
+    if isinstance(findings, str):
+        try:
+            findings = json.loads(findings)
+        except (json.JSONDecodeError, TypeError):
+            findings = []
+    if len(findings) >= 2:
+        available.append(f"{len(findings)} key findings")
+    else:
+        missing.append("Key findings (fewer than 2 extracted)")
+
+    entity_count = paper.get("entity_count", 0) or 0
+    claim_count = paper.get("claim_count", 0) or 0
+    if entity_count >= 3:
+        available.append(f"{entity_count} entities")
+    else:
+        missing.append(f"Entities (only {entity_count} extracted)")
+    if claim_count >= 2:
+        available.append(f"{claim_count} claims")
+    else:
+        missing.append(f"Claims (only {claim_count} extracted)")
+
+    completeness = paper.get("extraction_completeness", 0) or 0
+
+    if data_source.startswith("full_text") and completeness >= 0.5 and len(missing) <= 2:
+        level = "high"
+    elif completeness >= 0.3 and entity_count >= 3:
+        level = "medium"
+    else:
+        level = "low"
+
+    return level, available, missing
+
+
 def _build_critique_prompt(paper: dict, connections: list[dict]) -> str:
-    """Build the critique prompt from paper data."""
+    """Build the critique prompt from paper data with explicit data quality context."""
     authors = paper.get("authors") or []
     if isinstance(authors, str):
         authors = json.loads(authors)
@@ -39,20 +97,34 @@ def _build_critique_prompt(paper: dict, connections: list[dict]) -> str:
     findings = paper.get("key_findings") or []
     if isinstance(findings, str):
         findings = json.loads(findings)
-    findings_str = "\n".join(f"- {f}" for f in findings[:5]) if findings else "Not extracted"
+    findings_str = "\n".join(f"- {f}" for f in findings) if findings else "Not extracted"
 
     conn_str = ""
     if connections:
         conn_parts = []
-        for c in connections[:5]:
+        for c in connections[:10]:
             conn_parts.append(
-                f"- {c['connection_type'].upper()} → {c['connected_paper_title'][:60]}: {c['description'][:100]}"
+                f"- {c['connection_type'].upper()} → {c['connected_paper_title'][:80]}: {c['description'][:150]}"
             )
         conn_str = "\n\nKnown connections to other papers:\n" + "\n".join(conn_parts)
 
     abstract = paper.get("abstract") or ""
-    return f"""Analyze this scientific paper and produce an Intelligence Brief.
+    data_quality, available, missing_data = _assess_data_quality(paper)
 
+    data_context = f"""
+DATA COMPLETENESS: {data_quality.upper()}
+Available for analysis: {', '.join(available) if available else 'Minimal data'}
+Missing or incomplete: {', '.join(missing_data) if missing_data else 'None'}
+
+IMPORTANT: Your assessment can only be as good as the data available. If critical information is missing:
+- Do NOT score methodology or statistical rigor above 5.0 if you cannot see the methods/results sections
+- Note in weaknesses when your assessment is limited by incomplete data
+- Do NOT present limitations of the data extraction as flaws of the paper itself
+- Distinguish between "paper has this weakness" and "I cannot assess this because data is missing"
+"""
+
+    return f"""Analyze this scientific paper and produce an Intelligence Brief.
+{data_context}
 PAPER DETAILS:
 Title: {paper.get('title', 'Unknown')}
 Authors: {author_str}
@@ -64,7 +136,7 @@ Population: {paper.get('population', 'Unknown')}
 Primary outcome: {paper.get('primary_outcome', 'Unknown')}
 
 Abstract:
-{abstract[:1000]}
+{abstract}
 
 Key findings extracted by AI:
 {findings_str}
@@ -85,12 +157,13 @@ Produce your Intelligence Brief in this exact JSON format:
 }}
 
 Scoring guide:
-- methodology_score: rigor of study design, controls, sample size
+- methodology_score: rigor of study design, controls, sample size (cap at 5.0 if methods not visible)
 - reproducibility_score: clarity of methods, data availability, code sharing
 - novelty_score: how new are the findings relative to known literature
-- statistical_rigor: appropriate tests, effect sizes, confidence intervals, p-hacking risk
+- statistical_rigor: appropriate tests, effect sizes, confidence intervals (cap at 5.0 if stats not visible)
 
 Be direct. If the paper has serious flaws, say so. If it's genuinely excellent, say so.
+If your data is limited, be honest about what you can and cannot assess.
 Return only the JSON, no markdown."""
 
 
@@ -110,8 +183,17 @@ class CritiqueGenerator:
         self,
         paper: dict[str, Any],
         connections: list[dict[str, Any]] | None = None,
-    ) -> PaperCritique:
-        """Generate a critique for a single paper."""
+    ) -> PaperCritique | None:
+        """Generate a critique for a single paper. Returns None if data is insufficient."""
+        data_quality, available, missing = _assess_data_quality(paper)
+
+        entity_count = paper.get("entity_count", 0) or 0
+        claim_count = paper.get("claim_count", 0) or 0
+        if entity_count < 2 and claim_count < 1 and not paper.get("abstract"):
+            logger.warning("Skipping critique for %s — insufficient data (entities=%d, claims=%d)",
+                           paper.get("id"), entity_count, claim_count)
+            return None
+
         prompt = _build_critique_prompt(paper, connections or [])
 
         response = self._client.messages.create(
@@ -149,6 +231,7 @@ class CritiqueGenerator:
             red_flags=parsed.get("red_flags", []),
             summary=parsed.get("summary", ""),
             recommendation=parsed.get("recommendation", "skim"),
+            brief_confidence=data_quality,
             prompt_tokens=input_tokens,
             completion_tokens=output_tokens,
             cost_usd=cost,

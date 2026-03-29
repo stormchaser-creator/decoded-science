@@ -2,6 +2,7 @@ import React, { useState, useEffect, Suspense } from 'react'
 import { Link, useParams, useNavigate } from 'react-router-dom'
 import { API, s, parseJsonField, connectionEpistemicColor, EPISTEMIC, useIsMobile } from '../shared.js'
 import { TypeTag, StrengthBar, Loading, ErrorMsg } from '../components/ui.jsx'
+import SEO from '../components/SEO.jsx'
 
 const ForceGraph2D = React.lazy(() => import('react-force-graph-2d'))
 
@@ -119,6 +120,26 @@ export default function PaperDetailPage() {
 
   return (
     <div style={{ ...s.page, maxWidth: '1200px', padding: isMobile ? '16px' : '24px' }}>
+      <SEO
+        title={`AI Analysis: ${paper.title}`}
+        description={paper.abstract ? paper.abstract.substring(0, 155) + '…' : `Deep AI analysis of "${paper.title}" including extracted entities, methodological critique, missed connections, and convergence cluster mapping.`}
+        path={`/papers/${paper.id}`}
+        type="article"
+        schema={{
+          "@context": "https://schema.org",
+          "@type": "ScholarlyArticle",
+          "name": paper.title,
+          "description": paper.abstract || '',
+          "url": `https://thedecodedhuman.com/papers/${paper.id}`,
+          "datePublished": paper.published_date || undefined,
+          "author": Array.isArray(paper.authors) ? paper.authors.map(a => typeof a === 'string' ? a : a.name).filter(Boolean).join(', ') : undefined,
+          "isPartOf": {
+            "@type": "WebApplication",
+            "name": "The Decoded Human",
+            "url": "https://thedecodedhuman.com"
+          }
+        }}
+      />
       <Link to="/papers" style={s.btnOutline}>← Back</Link>
 
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '65% 35%', gap: '20px', marginTop: '16px', alignItems: 'start' }}>
@@ -144,10 +165,18 @@ export default function PaperDetailPage() {
                 </a>
               )}
             </div>
-            <div style={{ marginTop: '8px' }}>
+            <div style={{ marginTop: '8px', display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
               <span style={{ ...s.tag, ...(paper.status === 'extracted' || paper.status === 'connected' ? s.tagGreen : {}) }}>
                 {paper.status}
               </span>
+              {paper.data_source && (
+                <span style={{
+                  ...s.tag,
+                  ...(paper.data_source?.startsWith('full_text') ? s.tagGreen : { background: '#1a1500', color: '#fbbf24' }),
+                }}>
+                  {paper.data_source?.startsWith('full_text') ? 'Full Text' : 'Abstract Only'}
+                </span>
+              )}
               {paper.study_design && <span style={s.tag}>{paper.study_design}</span>}
               {paper.sample_size && <span style={s.tag}>n={paper.sample_size}</span>}
             </div>
@@ -237,6 +266,12 @@ export default function PaperDetailPage() {
           {/* Intelligence Brief */}
           {critique && (
             <div style={{ ...s.card, marginTop: '12px', padding: '20px' }}>
+              {/* Data quality warning */}
+              {(critique.brief_confidence === 'low' || critique.brief_confidence === 'insufficient' || (!critique.brief_confidence && paper.data_source === 'abstract_only')) && (
+                <div style={{ background: '#1a1500', border: '1px solid #3d2e00', borderRadius: '6px', padding: '10px 14px', marginBottom: '14px', fontSize: '12px', color: '#fbbf24', lineHeight: '1.6' }}>
+                  This analysis was generated from {paper.data_source === 'abstract_only' ? 'the abstract only — full paper text was not available' : 'limited data'}. Scores and assessments may not reflect the full paper.
+                </div>
+              )}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
                 <div style={s.sectionTitle}>Intelligence Brief</div>
                 <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
