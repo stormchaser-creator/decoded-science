@@ -14,6 +14,10 @@ CLI usage:
     python -m decoded.ingest.bulk_biorxiv --server both              # Both
     python -m decoded.ingest.bulk_biorxiv --server biorxiv --from-date 2023-01-01
     python -m decoded.ingest.bulk_biorxiv --limit 50000             # Cap at 50k
+
+    # Second pass — fetch full JATS XML for papers that only have abstracts:
+    python -m decoded.ingest.bulk_biorxiv --phase fulltext           # Upgrade fetched→parsed
+    python -m decoded.ingest.bulk_biorxiv --phase fulltext --concurrency 4
 """
 
 from __future__ import annotations
@@ -374,6 +378,169 @@ async def run_bulk_import(
 
 
 # ---------------------------------------------------------------------------
+# Full-text second pass
+# ---------------------------------------------------------------------------
+
+async def _get_jatsxml_url(doi: str, server: str, client: httpx.AsyncClient) -> str | None:
+    """Ask the biorxiv/medrxiv API for the JATS XML URL for a given DOI."""
+    base = MEDRXIV_API if server == "medrxiv" else BIORXIV_API
+    url = f"{base}/{server}/{doi}/na/json"
+    try:
+        resp = await client.get(url, timeout=20)
+        resp.raise_for_status()
+        collection = resp.json().get("collection", [])
+        if collection:
+            return collection[0].get("jatsxml")
+    except Exception:
+        pass
+    return None
+
+
+async def _fetch_and_parse_fulltext(
+    paper_id: str,
+    doi: str,
+    server: str,
+    semaphore: asyncio.Semaphore,
+    client: httpx.AsyncClient,
+) -> dict | None:
+    """Fetch JATS XML for one paper. Returns parsed dict or None."""
+    async with semaphore:
+        # Step 1: get jatsxml URL from API
+        jatsxml_url = await _get_jatsxml_url(doi, server, client)
+        if not jatsxml_url:
+            return None
+
+        await asyncio.sleep(0.3)  # polite delay
+
+        # Step 2: download the XML
+        try:
+            resp = await client.get(jatsxml_url, timeout=60, follow_redirects=True)
+            resp.raise_for_status()
+            xml_bytes = resp.content
+        except Exception as exc:
+            logger.debug("XML download failed for %s: %s", doi, exc)
+            return None
+
+        # Step 3: parse with existing JATS parser
+        from decoded.ingest.parse import parse_article
+        parsed = parse_article("jats", xml_bytes)
+        if not parsed:
+            return None
+
+        return parsed
+
+
+async def run_fulltext_phase(
+    concurrency: int = 4,
+    limit: int = 0,
+    sources: list[str] | None = None,
+):
+    """Second pass: fetch full JATS XML for biorxiv/medrxiv papers that only have abstracts.
+
+    Finds all papers with status='fetched' (abstract only, no full text),
+    downloads JATS XML from bioRxiv content server, parses, and updates to status='parsed'.
+    """
+    if sources is None:
+        sources = ["biorxiv", "medrxiv"]
+
+    conn = get_db_conn()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+    placeholders = ", ".join(["%s"] * len(sources))
+    query = f"""
+        SELECT id, doi, source, title
+        FROM raw_papers
+        WHERE source IN ({placeholders})
+          AND status = 'fetched'
+          AND doi IS NOT NULL
+          AND (full_text IS NULL OR full_text = '')
+        ORDER BY pub_year DESC NULLS LAST
+        {"LIMIT %s" if limit else ""}
+    """
+    params = list(sources) + ([limit] if limit else [])
+    cur.execute(query, params)
+    papers = cur.fetchall()
+
+    logger.info(
+        "Full-text second pass: %d biorxiv/medrxiv papers to upgrade",
+        len(papers),
+    )
+
+    if not papers:
+        logger.info("Nothing to do — all papers already have full text or no DOI")
+        conn.close()
+        return
+
+    semaphore = asyncio.Semaphore(concurrency)
+    stats = {"upgraded": 0, "no_xml": 0, "errors": 0}
+
+    async with httpx.AsyncClient(
+        timeout=60,
+        follow_redirects=True,
+        headers={"User-Agent": "Decoded-Research-Pipeline/1.0 (research; mailto:research@thedecodedhuman.com)"},
+    ) as client:
+
+        async def process_one(paper: dict):
+            doi = paper["doi"]
+            server = paper["source"]
+            paper_id = str(paper["id"])
+
+            parsed = await _fetch_and_parse_fulltext(paper_id, doi, server, semaphore, client)
+
+            if parsed is None:
+                stats["no_xml"] += 1
+                return
+
+            # Build UPDATE params — only set fields that were successfully parsed
+            updates = ["status='parsed'", "updated_at=NOW()"]
+            vals: list = []
+
+            if parsed.get("full_text"):
+                updates.append("full_text=%s")
+                vals.append(parsed["full_text"])
+            if parsed.get("sections"):
+                updates.append("sections=%s")
+                vals.append(json.dumps(parsed["sections"]))
+            if parsed.get("abstract") and not paper.get("abstract"):
+                updates.append("abstract=%s")
+                vals.append(parsed["abstract"])
+            if parsed.get("authors"):
+                updates.append("authors=%s")
+                vals.append(json.dumps(parsed["authors"]))
+            if parsed.get("reference_count"):
+                updates.append("reference_count=%s")
+                vals.append(parsed["reference_count"])
+            if parsed.get("references"):
+                updates.append("references_list=%s")
+                vals.append(json.dumps(parsed["references"][:500]))
+
+            vals.append(paper_id)
+            update_cur = conn.cursor()
+            update_cur.execute(
+                f"UPDATE raw_papers SET {', '.join(updates)} WHERE id=%s",
+                vals,
+            )
+            conn.commit()
+            stats["upgraded"] += 1
+
+            if stats["upgraded"] % 100 == 0:
+                logger.info(
+                    "Full-text progress: %d upgraded, %d no_xml, %d errors",
+                    stats["upgraded"], stats["no_xml"], stats["errors"],
+                )
+
+        tasks = [process_one(p) for p in papers]
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+    conn.close()
+    logger.info(
+        "Full-text phase complete: %d upgraded to parsed, %d no XML available, %d errors",
+        stats["upgraded"], stats["no_xml"], stats["errors"],
+    )
+    return stats
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -381,24 +548,38 @@ def main():
     parser = argparse.ArgumentParser(
         description="BioRxiv/MedRxiv full archive bulk importer"
     )
+    parser.add_argument("--phase", choices=["import", "fulltext"], default="import",
+                        help="import=bulk date-range import, fulltext=upgrade abstracts to full text")
     parser.add_argument("--server", choices=["biorxiv", "medrxiv", "both"], default="biorxiv")
     parser.add_argument("--from-date", default="2019-01-01", help="Start date (YYYY-MM-DD)")
     parser.add_argument("--to-date", default=None, help="End date (default: today)")
-    parser.add_argument("--limit", type=int, default=0, help="Max papers to import (0=all)")
+    parser.add_argument("--limit", type=int, default=0, help="Max papers to import/upgrade (0=all)")
     parser.add_argument("--batch-size", type=int, default=500, help="DB insert batch size")
+    parser.add_argument("--concurrency", type=int, default=4, help="Concurrent fetches for fulltext phase")
     parser.add_argument(
         "--all-categories", action="store_true",
         help="Import all categories (default: biology-relevant only)"
     )
     args = parser.parse_args()
 
-    asyncio.run(run_bulk_import(
-        server=args.server,
-        date_from=args.from_date,
-        date_to=args.to_date,
-        limit=args.limit,
-        batch_size=args.batch_size,
-    ))
+    if args.phase == "fulltext":
+        sources = (
+            ["biorxiv", "medrxiv"] if args.server == "both"
+            else [args.server]
+        )
+        asyncio.run(run_fulltext_phase(
+            concurrency=args.concurrency,
+            limit=args.limit,
+            sources=sources,
+        ))
+    else:
+        asyncio.run(run_bulk_import(
+            server=args.server,
+            date_from=args.from_date,
+            date_to=args.to_date,
+            limit=args.limit,
+            batch_size=args.batch_size,
+        ))
 
 
 if __name__ == "__main__":
