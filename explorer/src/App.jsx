@@ -15,6 +15,7 @@ import AnalyzePage from './pages/AnalyzePage.jsx'
 import ExplorePage from './pages/ExplorePage.jsx'
 import WorkspacePage from './pages/WorkspacePage.jsx'
 import { LoginPage, RegisterPage } from './pages/AuthPages.jsx'
+import AboutPage from './pages/AboutPage.jsx'
 
 // ---------------------------------------------------------------------------
 // Home page
@@ -137,6 +138,7 @@ function Header({ stats }) {
         <NavLink to="/bridge" style={navLinkStyle}>Bridge</NavLink>
         <NavLink to="/analyze" style={navLinkStyle}>Analyze</NavLink>
         {user && <NavLink to="/workspace" style={navLinkStyle}>Workspace</NavLink>}
+        <NavLink to="/about" style={navLinkStyle}>About</NavLink>
       </nav>
       <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
         {stats && (
@@ -184,6 +186,7 @@ function AppInner({ stats, featuredBriefs }) {
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
         <Route path="/workspace" element={<WorkspacePage />} />
+        <Route path="/about" element={<AboutPage />} />
       </Routes>
     </div>
   )
