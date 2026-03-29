@@ -464,7 +464,9 @@ async def run_fulltext_phase(
           AND status = 'fetched'
           AND doi IS NOT NULL
           AND (full_text IS NULL OR full_text = '')
-        ORDER BY pub_year DESC NULLS LAST
+        ORDER BY
+            CASE WHEN doi LIKE '10.1101%%' THEN 0 ELSE 1 END,
+            pub_year DESC NULLS LAST
         {"LIMIT %s" if limit else ""}
     """
     params = list(sources) + ([limit] if limit else [])
