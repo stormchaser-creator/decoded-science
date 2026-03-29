@@ -1,6 +1,13 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, Link, NavLink, useNavigate } from 'react-router-dom'
 import { API, s, useIsMobile } from './shared.js'
+
+const ForceGraph2D = React.lazy(() => import('react-force-graph-2d'))
+
+const DISCIPLINE_COLORS_BG = {
+  pubmed: '#7c6af7', biorxiv: '#10b981', medrxiv: '#f59e0b',
+  arxiv: '#60a5fa', default: '#94a3b8',
+}
 import { AuthProvider, useAuth } from './auth.jsx'
 import { navLinkStyle } from './components/ui.jsx'
 
@@ -50,10 +57,42 @@ function FeaturedBrief({ brief }) {
   )
 }
 
-function HomePage({ stats, featuredBriefs }) {
+function BackgroundGraph({ graphData }) {
+  if (!graphData || graphData.nodes.length === 0) return null
+  return (
+    <div style={{ position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none', zIndex: 0 }}>
+      <Suspense fallback={null}>
+        <ForceGraph2D
+          graphData={graphData}
+          nodeColor={n => DISCIPLINE_COLORS_BG[n.source] || DISCIPLINE_COLORS_BG.default}
+          nodeVal={n => Math.sqrt((n.val || 1) + 1)}
+          linkColor={() => 'rgba(124,106,247,0.08)'}
+          linkWidth={0.5}
+          nodeRelSize={3}
+          enableZoomInteraction={false}
+          enablePanInteraction={false}
+          enableNodeDrag={false}
+          cooldownTicks={80}
+          width={typeof window !== 'undefined' ? window.innerWidth : 1200}
+          height={typeof window !== 'undefined' ? window.innerHeight : 800}
+          nodeCanvasObject={(node, ctx) => {
+            ctx.beginPath()
+            ctx.arc(node.x, node.y, 2.5, 0, 2 * Math.PI)
+            ctx.fillStyle = (DISCIPLINE_COLORS_BG[node.source] || DISCIPLINE_COLORS_BG.default) + '55'
+            ctx.fill()
+          }}
+        />
+      </Suspense>
+    </div>
+  )
+}
+
+function HomePage({ stats, featuredBriefs, graphData }) {
   const isMobile = useIsMobile()
   return (
-    <div style={{ ...s.page, paddingTop: isMobile ? '24px' : '48px' }}>
+    <div style={{ ...s.page, paddingTop: isMobile ? '24px' : '48px', position: 'relative' }}>
+      {!isMobile && <BackgroundGraph graphData={graphData} />}
+      <div style={{ position: 'relative', zIndex: 1 }}>
       <div style={{ textAlign: 'center', maxWidth: '600px', margin: `0 auto ${isMobile ? '32px' : '48px'}` }}>
         <div style={{ fontSize: isMobile ? '32px' : '40px', marginBottom: '16px' }}>⬡</div>
         <h1 style={{ fontSize: isMobile ? '24px' : '32px', fontWeight: '800', color: '#e0e0e8', margin: '0 0 12px', letterSpacing: '-1px' }}>
@@ -114,6 +153,7 @@ function HomePage({ stats, featuredBriefs }) {
           </div>
         </div>
       )}
+      </div>{/* end z-1 content */}
     </div>
   )
 }
@@ -216,12 +256,12 @@ function Header({ stats }) {
 // App shell
 // ---------------------------------------------------------------------------
 
-function AppInner({ stats, featuredBriefs }) {
+function AppInner({ stats, featuredBriefs, graphData }) {
   return (
     <div style={s.app}>
       <Header stats={stats} />
       <Routes>
-        <Route path="/" element={<HomePage stats={stats} featuredBriefs={featuredBriefs} />} />
+        <Route path="/" element={<HomePage stats={stats} featuredBriefs={featuredBriefs} graphData={graphData} />} />
         <Route path="/papers" element={<PapersPage />} />
         <Route path="/papers/:id" element={<PaperDetailPage />} />
         <Route path="/paper/:id" element={<PaperDetailPage />} />
@@ -244,18 +284,23 @@ function AppInner({ stats, featuredBriefs }) {
 export default function App() {
   const [stats, setStats] = useState(null)
   const [featuredBriefs, setFeaturedBriefs] = useState(null)
+  const [graphData, setGraphData] = useState({ nodes: [], links: [] })
 
   useEffect(() => {
     fetch(`${API}/v1/stats`).then(r => r.json()).then(setStats).catch(() => {})
     fetch(`${API}/critiques?limit=5&quality=high`).then(r => r.json())
       .then(d => setFeaturedBriefs(d.critiques || []))
       .catch(() => {})
+    // Load top 100 nodes for background graph (non-blocking)
+    fetch(`${API}/v1/graph/overview?limit=100`).then(r => r.json())
+      .then(d => setGraphData({ nodes: d.nodes || [], links: d.links || [] }))
+      .catch(() => {})
   }, [])
 
   return (
     <BrowserRouter>
       <AuthProvider>
-        <AppInner stats={stats} featuredBriefs={featuredBriefs} />
+        <AppInner stats={stats} featuredBriefs={featuredBriefs} graphData={graphData} />
       </AuthProvider>
     </BrowserRouter>
   )
