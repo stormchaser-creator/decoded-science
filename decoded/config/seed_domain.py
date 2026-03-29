@@ -142,6 +142,38 @@ LONGEVITY_DOMAIN = SeedDomainConfig(
             max_results=150,
             priority=70,
         ),
+        # bioRxiv preprints — cutting-edge longevity research
+        RingQuery(
+            query="hallmarks aging senescence telomere mitochondria epigenetic",
+            source="biorxiv",
+            max_results=200,
+            priority=95,
+        ),
+        RingQuery(
+            query="mTOR rapamycin NAD sirtuin aging lifespan extension",
+            source="biorxiv",
+            max_results=200,
+            priority=90,
+        ),
+        RingQuery(
+            query="partial reprogramming Yamanaka aging rejuvenation epigenetic reset",
+            source="biorxiv",
+            max_results=150,
+            priority=85,
+        ),
+        RingQuery(
+            query="senolytic senolytics senescent cell clearance aging",
+            source="biorxiv",
+            max_results=150,
+            priority=85,
+        ),
+        # arXiv — computational/systems biology longevity
+        RingQuery(
+            query="aging longevity computational biology machine learning biomarker",
+            source="arxiv",
+            max_results=100,
+            priority=70,
+        ),
     ],
 
     # -----------------------------------------------------------------------
@@ -207,6 +239,25 @@ LONGEVITY_DOMAIN = SeedDomainConfig(
             query="AMPK activators aging metabolism",
             max_results=150,
             priority=50,
+        ),
+        # bioRxiv preprints — longevity interventions
+        RingQuery(
+            query="metformin senolytics rapamycin longevity intervention clinical",
+            source="biorxiv",
+            max_results=150,
+            priority=65,
+        ),
+        RingQuery(
+            query="gut microbiome aging longevity fecal transplant",
+            source="biorxiv",
+            max_results=150,
+            priority=60,
+        ),
+        RingQuery(
+            query="biological age clock reversal epigenetic reprogramming",
+            source="biorxiv",
+            max_results=150,
+            priority=60,
         ),
     ],
 

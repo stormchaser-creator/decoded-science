@@ -31,6 +31,8 @@ load_dotenv(_ROOT / ".env", override=False)
 from decoded.ingest.discover import PMCDiscoverer
 from decoded.ingest.fetch import PMCFetcher
 from decoded.ingest.parse import JATSParser, BioCParser, parse_article
+from decoded.ingest.europepmc import EuropePMCDiscoverer
+from decoded.ingest.arxiv import ArxivDiscoverer
 
 logging.basicConfig(
     level=logging.INFO,
@@ -284,11 +286,97 @@ class IngestWorker:
         self.dry_run = dry_run
 
         api_key = os.environ.get("NCBI_API_KEY")
-        self.discoverer = PMCDiscoverer(api_key=api_key)
-        self.fetcher = PMCFetcher(raw_xml_dir=raw_xml_dir)
+        if source in ("biorxiv", "medrxiv"):
+            self.discoverer = EuropePMCDiscoverer()
+            self.fetcher = None
+        elif source == "arxiv":
+            self.discoverer = ArxivDiscoverer()
+            self.fetcher = None
+        else:
+            self.discoverer = PMCDiscoverer(api_key=api_key)
+            self.fetcher = PMCFetcher(raw_xml_dir=raw_xml_dir)
 
     async def run(self) -> dict[str, int]:
         """Run the full ingest pipeline. Returns stats dict."""
+        if self.source in ("biorxiv", "medrxiv", "arxiv"):
+            return await self._run_preprint_ingest()
+        return await self._run_pubmed_ingest()
+
+    async def _run_preprint_ingest(self) -> dict[str, int]:
+        """Ingest biorxiv/medrxiv/arxiv preprints (abstract-only, no full-text fetch)."""
+        conn = get_db_conn()
+        run_id = create_ingest_run(
+            conn, self.domain, self.ring, self.source, self.query, self.limit
+        )
+        logger.info(
+            "Starting preprint ingest: source=%s ring=%d query='%s' limit=%d",
+            self.source, self.ring, self.query, self.limit,
+        )
+
+        stats = {"found": 0, "new": 0, "skipped": 0, "fetched": 0, "parsed": 0, "errors": 0}
+
+        try:
+            if self.source == "arxiv":
+                records = await self.discoverer.discover(
+                    query=self.query,
+                    max_results=self.limit,
+                )
+            else:
+                records = await self.discoverer.discover(
+                    query=self.query,
+                    max_results=self.limit,
+                    server=self.source,
+                )
+            stats["found"] = len(records)
+            logger.info("Discovered %d %s preprints", len(records), self.source)
+
+            if self.dry_run:
+                for r in records[:5]:
+                    logger.info("  [dry-run] %s | %s", r.get("external_id"), r.get("title", "")[:80])
+                return stats
+
+            for rec in records:
+                paper_id, is_new = upsert_paper(conn, rec, run_id)
+                if not paper_id:
+                    stats["skipped"] += 1
+                    continue
+                if not is_new:
+                    stats["skipped"] += 1
+                    continue
+                stats["new"] += 1
+
+                # Mark as fetched immediately — abstract is available for extraction
+                if rec.get("abstract"):
+                    cur = conn.cursor()
+                    cur.execute(
+                        "UPDATE raw_papers SET status='fetched', updated_at=NOW() WHERE id=%s AND status='queued'",
+                        (paper_id,),
+                    )
+                    conn.commit()
+                    stats["fetched"] += 1
+
+            finish_ingest_run(
+                conn, run_id,
+                found=stats["found"],
+                new_=stats["new"],
+                skipped=stats["skipped"],
+            )
+            logger.info(
+                "Preprint ingest complete: found=%d new=%d fetched=%d skipped=%d",
+                stats["found"], stats["new"], stats["fetched"], stats["skipped"],
+            )
+
+        except Exception as exc:
+            logger.error("Preprint ingest failed: %s", exc, exc_info=True)
+            finish_ingest_run(conn, run_id, 0, 0, 0, status="failed", error=str(exc))
+            raise
+        finally:
+            conn.close()
+
+        return stats
+
+    async def _run_pubmed_ingest(self) -> dict[str, int]:
+        """Original PubMed ingest: discover → fetch PMC full text → parse."""
         conn = get_db_conn()
         run_id = create_ingest_run(
             conn, self.domain, self.ring, self.source, self.query, self.limit
@@ -484,12 +572,13 @@ async def _async_main(args):
         date_to = q.date_to if hasattr(q, "date_to") else None
         this_limit = min(per_query_limit, remaining)
 
+        source = q.source if hasattr(q, "source") else "pubmed"
         worker = IngestWorker(
             ring=ring,
             query=query_str,
             limit=this_limit,
             domain=args.domain,
-            source="pubmed",
+            source=source,
             date_from=date_from,
             date_to=date_to,
             raw_xml_dir=Path(args.raw_xml_dir) if args.raw_xml_dir else None,
