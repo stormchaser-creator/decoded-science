@@ -2,10 +2,10 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "decoded-explorer",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
-      "cwd": "explorer",
+      "name": "explorer",
+      "runtimeExecutable": "/Users/whit/Projects/Decoded/explorer/node_modules/.bin/vite",
+      "runtimeArgs": [],
+      "cwd": "/Users/whit/Projects/Decoded/explorer",
       "port": 5173
     },
     {
