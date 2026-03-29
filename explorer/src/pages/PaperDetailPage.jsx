@@ -236,10 +236,15 @@ export default function PaperDetailPage() {
 
           {/* Intelligence Brief */}
           {critique && (
-            <div style={{ ...s.card, marginTop: '12px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+            <div style={{ ...s.card, marginTop: '12px', padding: '20px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
                 <div style={s.sectionTitle}>Intelligence Brief</div>
-                <div style={{ display: 'flex', gap: '8px' }}>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  {critique.recommendation && (
+                    <span style={{ ...s.tag, marginTop: 0, fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.5px', ...s.tagBlue }}>
+                      {critique.recommendation}
+                    </span>
+                  )}
                   {critique.overall_quality && (
                     <span style={{
                       ...s.tag,
@@ -252,10 +257,68 @@ export default function PaperDetailPage() {
                   )}
                 </div>
               </div>
+
+              {/* Score bars */}
+              {(critique.methodology_score || critique.reproducibility_score || critique.novelty_score || critique.statistical_rigor) && (
+                <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : '1fr 1fr 1fr 1fr', gap: '10px', marginBottom: '16px' }}>
+                  {[
+                    { label: 'Methodology', score: critique.methodology_score, color: '#7c6af7' },
+                    { label: 'Reproducibility', score: critique.reproducibility_score, color: '#4ade80' },
+                    { label: 'Novelty', score: critique.novelty_score, color: '#fbbf24' },
+                    { label: 'Statistical Rigor', score: critique.statistical_rigor, color: '#60a5fa' },
+                  ].filter(s => s.score != null).map(({ label, score, color }) => (
+                    <div key={label} style={{ textAlign: 'center' }}>
+                      <div style={{ fontSize: '20px', fontWeight: '700', color }}>{typeof score === 'number' ? score.toFixed(1) : score}</div>
+                      <div style={{ fontSize: '10px', color: '#6b7280', marginTop: '2px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{label}</div>
+                      <div style={{ marginTop: '4px', height: '3px', background: '#1e1e2e', borderRadius: '2px', overflow: 'hidden' }}>
+                        <div style={{ height: '100%', width: `${(parseFloat(score) || 0) * 10}%`, background: color, borderRadius: '2px' }} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Summary */}
               {(critique.summary || critique.brief) && (
-                <p style={{ fontSize: '13px', color: '#a0a0b8', lineHeight: '1.7', whiteSpace: 'pre-wrap', margin: 0 }}>
+                <p style={{ fontSize: '13px', color: '#c4bef8', lineHeight: '1.8', margin: '0 0 16px', borderLeft: '3px solid #2d2060', paddingLeft: '12px' }}>
                   {critique.summary || critique.brief}
                 </p>
+              )}
+
+              {/* Strengths */}
+              {critique.strengths && critique.strengths.length > 0 && (
+                <div style={{ marginBottom: '14px' }}>
+                  <div style={{ fontSize: '11px', fontWeight: '700', color: '#4ade80', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px' }}>Strengths</div>
+                  {(typeof critique.strengths === 'string' ? [critique.strengths] : critique.strengths).map((s, i) => (
+                    <div key={i} style={{ fontSize: '12px', color: '#9991d0', lineHeight: '1.7', marginBottom: '6px', paddingLeft: '12px', borderLeft: '2px solid #0d2010' }}>
+                      {typeof s === 'string' ? s : s.text || JSON.stringify(s)}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Weaknesses */}
+              {critique.weaknesses && critique.weaknesses.length > 0 && (
+                <div style={{ marginBottom: '14px' }}>
+                  <div style={{ fontSize: '11px', fontWeight: '700', color: '#fbbf24', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px' }}>Weaknesses</div>
+                  {(typeof critique.weaknesses === 'string' ? [critique.weaknesses] : critique.weaknesses).map((w, i) => (
+                    <div key={i} style={{ fontSize: '12px', color: '#9991d0', lineHeight: '1.7', marginBottom: '6px', paddingLeft: '12px', borderLeft: '2px solid #1a1500' }}>
+                      {typeof w === 'string' ? w : w.text || JSON.stringify(w)}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Red Flags */}
+              {critique.red_flags && critique.red_flags.length > 0 && (
+                <div>
+                  <div style={{ fontSize: '11px', fontWeight: '700', color: '#f87171', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px' }}>Red Flags</div>
+                  {(typeof critique.red_flags === 'string' ? [critique.red_flags] : critique.red_flags).map((r, i) => (
+                    <div key={i} style={{ fontSize: '12px', color: '#9991d0', lineHeight: '1.7', marginBottom: '6px', paddingLeft: '12px', borderLeft: '2px solid #1a0808' }}>
+                      {typeof r === 'string' ? r : r.text || JSON.stringify(r)}
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
           )}
