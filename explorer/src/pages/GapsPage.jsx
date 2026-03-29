@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { API, s } from '../shared.js'
 import { Loading, ErrorMsg } from '../components/ui.jsx'
+import SEO from '../components/SEO.jsx'
 
 export default function GapsPage() {
   const [gaps, setGaps] = useState([])
@@ -17,6 +18,11 @@ export default function GapsPage() {
 
   return (
     <div style={s.page}>
+      <SEO
+        title="Research Field Gaps"
+        description="Identify gaps in the scientific literature — areas where connections should exist but don't, suggesting unexplored research opportunities across disciplines."
+        path="/gaps"
+      />
       <div style={{ marginBottom: '20px' }}>
         <h2 style={{ fontSize: '20px', fontWeight: '700', color: '#e0e0e8', margin: '0 0 6px' }}>Field Gaps</h2>
         <p style={{ fontSize: '13px', color: '#6b7280', margin: 0 }}>

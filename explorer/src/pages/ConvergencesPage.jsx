@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { API, s, EPISTEMIC, useIsMobile } from '../shared.js'
 import { TypeTag, Loading, ErrorMsg } from '../components/ui.jsx'
+import SEO from '../components/SEO.jsx'
 
 export default function ConvergencesPage() {
   const isMobile = useIsMobile()
@@ -28,6 +29,11 @@ export default function ConvergencesPage() {
 
   return (
     <div style={isMobile ? { display: 'flex', flexDirection: 'column' } : s.twoCol}>
+      <SEO
+        title="Convergence Clusters"
+        description="Discover clusters of papers from different fields that converge on the same mechanisms, entities, or findings. See where independent research lines are unknowingly confirming each other."
+        path="/convergences"
+      />
       <aside style={isMobile ? { padding: '16px', borderBottom: '1px solid #1e1e2e', background: '#0d0d18' } : s.sidebar}>
         <div style={s.sectionTitle}>Convergence Zones</div>
         <p style={{ fontSize: '12px', color: '#6b7280', lineHeight: '1.6', marginBottom: '16px' }}>

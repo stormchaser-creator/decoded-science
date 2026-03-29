@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { API, s } from '../shared.js'
 import { ErrorMsg } from '../components/ui.jsx'
+import SEO from '../components/SEO.jsx'
 
 const STAGES = [
   { key: 'fetching', label: 'Fetching paper from DOI', icon: '🌐' },
@@ -109,6 +110,11 @@ export default function AnalyzePage() {
 
   return (
     <div style={s.page}>
+      <SEO
+        title="Analyze a Paper"
+        description="Submit a research paper for AI-powered analysis. Extract entities, map connections to the existing knowledge graph, and discover what the literature knows that the paper alone can't see."
+        path="/analyze"
+      />
       <div style={{ maxWidth: '640px' }}>
         <h2 style={{ fontSize: '20px', fontWeight: '700', color: '#e0e0e8', margin: '0 0 6px' }}>On-demand Analysis</h2>
         <p style={{ fontSize: '13px', color: '#6b7280', marginBottom: '24px' }}>

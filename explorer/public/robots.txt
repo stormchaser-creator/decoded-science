@@ -1,0 +1,10 @@
+User-agent: *
+Allow: /
+
+# Disallow authenticated/internal routes
+Disallow: /workspace
+Disallow: /login
+Disallow: /register
+Disallow: /api
+
+Sitemap: https://thedecodedhuman.com/sitemap.xml

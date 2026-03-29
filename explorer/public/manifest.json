@@ -1,0 +1,16 @@
+{
+  "name": "The Decoded Human — Literature Connectome Explorer",
+  "short_name": "Decoded Human",
+  "description": "AI-powered knowledge graph discovering hidden connections across scientific literature",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0a0f",
+  "theme_color": "#7c6af7",
+  "icons": [
+    {
+      "src": "/favicon.ico",
+      "sizes": "64x64",
+      "type": "image/x-icon"
+    }
+  ]
+}

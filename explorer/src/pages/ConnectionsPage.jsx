@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { API, s, useIsMobile } from '../shared.js'
 import { TypeTag, StrengthBar, Loading, ErrorMsg } from '../components/ui.jsx'
+import SEO from '../components/SEO.jsx'
 
 const CONNECTION_TYPES = [
   'contradicts', 'extends', 'mechanism_for',
@@ -36,6 +37,11 @@ export default function ConnectionsPage() {
 
   return (
     <div style={isMobile ? { display: 'flex', flexDirection: 'column' } : s.twoCol}>
+      <SEO
+        title="Cross-Paper Connections"
+        description="Explore connections between research papers discovered through shared scientific content — entities, mechanisms, and findings that link work across disciplines and fields."
+        path="/connections"
+      />
       <aside style={isMobile ? { padding: '16px', borderBottom: '1px solid #1e1e2e', background: '#0d0d18' } : s.sidebar}>
         <div style={s.sectionTitle}>Filter</div>
         <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '6px' }}>Connection Type</div>

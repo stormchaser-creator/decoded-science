@@ -1,5 +1,6 @@
 import React from 'react'
 import { s, useIsMobile } from '../shared.js'
+import SEO from '../components/SEO.jsx'
 
 function Section({ title, children }) {
   return (
@@ -47,6 +48,11 @@ export default function AboutPage() {
   const grid2 = { display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '12px' }
   return (
     <div style={{ ...s.page, maxWidth: '780px', margin: '0 auto', padding: isMobile ? '16px' : '24px' }}>
+      <SEO
+        title="About the Literature Connectome"
+        description="How The Decoded Human uses AI to build a knowledge graph connecting research papers through shared entities, mechanisms, and claims — not just citations. Discover what no individual paper can see."
+        path="/about"
+      />
       {/* Hero */}
       <div style={{ textAlign: 'center', paddingTop: '48px', marginBottom: '56px' }}>
         <div style={{ fontSize: '40px', marginBottom: '16px' }}>⬡</div>

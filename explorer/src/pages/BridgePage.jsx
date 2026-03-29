@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { API, s, EPISTEMIC } from '../shared.js'
 import { ErrorMsg } from '../components/ui.jsx'
+import SEO from '../components/SEO.jsx'
 
 const TIER_LABELS = {
   graph: { label: 'Graph Path', color: EPISTEMIC.convergence, icon: '🔗' },
@@ -56,6 +57,11 @@ export default function BridgePage() {
 
   return (
     <div style={s.page}>
+      <SEO
+        title="Bridge Query — Find Hidden Connections"
+        description="Enter two scientific concepts and discover if a connection exists in the literature. The Bridge Query searches the knowledge graph for paths between them and generates hypotheses with confidence scores."
+        path="/bridge"
+      />
       <h2 style={{ fontSize: '20px', fontWeight: '700', color: '#e0e0e8', margin: '0 0 6px' }}>Bridge Query</h2>
       <p style={{ fontSize: '13px', color: '#6b7280', marginBottom: '8px' }}>
         Find hidden connections between two research concepts. Three-tier search: direct graph path → semantic bridge → LLM hypothesis.

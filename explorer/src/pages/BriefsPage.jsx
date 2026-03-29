@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { API, s, parseJsonField } from '../shared.js'
 import { Loading, ErrorMsg } from '../components/ui.jsx'
+import SEO from '../components/SEO.jsx'
 
 const QUALITY_FILTERS = [
   { key: '', label: 'All' },
@@ -57,6 +58,11 @@ export default function BriefsPage() {
 
   return (
     <div style={s.page}>
+      <SEO
+        title="Intelligence Briefs"
+        description="AI-generated intelligence briefs providing deep analysis of high-impact papers: methodological critique, missed connections, convergence mapping, and research trajectory implications."
+        path="/briefs"
+      />
       <div style={{ marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: '12px' }}>
         <div>
           <h2 style={{ fontSize: '20px', fontWeight: '700', color: '#e0e0e8', margin: '0 0 6px' }}>Intelligence Briefs</h2>

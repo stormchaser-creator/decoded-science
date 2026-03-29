@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { API, s, useIsMobile } from '../shared.js'
 import { ErrorMsg } from '../components/ui.jsx'
+import SEO from '../components/SEO.jsx'
 
 const PAGE_SIZE = 50
 
@@ -44,6 +45,11 @@ export default function PapersPage() {
 
   return (
     <div style={isMobile ? { display: 'flex', flexDirection: 'column' } : s.twoCol}>
+      <SEO
+        title="Research Papers & AI Analysis"
+        description="Browse papers ingested into the Literature Connectome. Each paper includes AI-extracted entities, claims, methodology analysis, and connection mapping to related work across fields."
+        path="/papers"
+      />
       <aside style={isMobile ? { padding: '16px', borderBottom: '1px solid #1e1e2e', background: '#0d0d18' } : s.sidebar}>
         <div style={s.sectionTitle}>Search Papers</div>
         <input

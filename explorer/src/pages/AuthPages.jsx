@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { API, s } from '../shared.js'
 import { useAuth } from '../auth.jsx'
 import { ErrorMsg } from '../components/ui.jsx'
+import SEO from '../components/SEO.jsx'
 
 export function LoginPage() {
   const [email, setEmail] = useState('')
@@ -34,6 +35,7 @@ export function LoginPage() {
 
   return (
     <div style={s.formCard}>
+      <SEO title="Sign In" description="Sign in to The Decoded Human to access your workspace, saved analyses, and personalized research tools." path="/login" noindex={true} />
       <div style={s.formTitle}>Sign in</div>
       <div style={s.formSub}>Access your workspace and saved searches.</div>
       {error && <ErrorMsg msg={error} />}
@@ -84,6 +86,7 @@ export function RegisterPage() {
 
   return (
     <div style={s.formCard}>
+      <SEO title="Create Account" description="Create a free account on The Decoded Human to save research, track connections, and access the full Literature Connectome toolkit." path="/register" noindex={true} />
       <div style={s.formTitle}>Create account</div>
       <div style={s.formSub}>Save searches, build collections, set up alerts.</div>
       {error && <ErrorMsg msg={error} />}

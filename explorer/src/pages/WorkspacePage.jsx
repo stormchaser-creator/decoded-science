@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { API, s, authFetch } from '../shared.js'
 import { useAuth } from '../auth.jsx'
 import { Loading, ErrorMsg } from '../components/ui.jsx'
+import SEO from '../components/SEO.jsx'
 
 export default function WorkspacePage() {
   const { user, token } = useAuth()
@@ -58,6 +59,7 @@ export default function WorkspacePage() {
 
   return (
     <div style={s.page}>
+      <SEO title="Your Workspace" description="Your personal research workspace on The Decoded Human." path="/workspace" noindex={true} />
       <div style={{ marginBottom: '24px' }}>
         <h2 style={{ fontSize: '20px', fontWeight: '700', color: '#e0e0e8', margin: '0 0 4px' }}>Workspace</h2>
         <div style={{ fontSize: '13px', color: '#6b7280' }}>

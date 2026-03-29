@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef, Suspense } from 'react
 import { useNavigate } from 'react-router-dom'
 import { API, s } from '../shared.js'
 import { Loading, ErrorMsg } from '../components/ui.jsx'
+import SEO from '../components/SEO.jsx'
 
 // Lazy load the heavy graph component
 const ForceGraph2D = React.lazy(() => import('react-force-graph-2d'))
@@ -149,6 +150,11 @@ export default function ExplorePage() {
 
   return (
     <div style={{ display: 'flex', height: 'calc(100vh - 57px)', overflow: 'hidden', position: 'relative' }}>
+      <SEO
+        title="Explore the Connectome Graph"
+        description="Navigate the Literature Connectome — an interactive knowledge graph of scientific papers connected by shared entities, mechanisms, methods, and findings across disciplines."
+        path="/explore"
+      />
       {/* Filter panel */}
       <aside style={{
         width: filterOpen ? '240px' : '0',
