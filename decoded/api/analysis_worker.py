@@ -45,13 +45,22 @@ class AnalysisWorker:
 
         # Check if already in DB
         cur.execute(
-            "SELECT id, status FROM raw_papers WHERE doi = %s LIMIT 1",
+            "SELECT id, status, abstract, full_text, sections FROM raw_papers WHERE doi = %s LIMIT 1",
             (doi,),
         )
         existing = cur.fetchone()
         if existing:
             paper_id = str(existing["id"])
-            logger.info("DOI %s already in DB as paper %s (status: %s)", doi, paper_id, existing["status"])
+            has_content = bool(
+                existing["abstract"] or existing["full_text"] or
+                (existing["sections"] and existing["sections"] != {})
+            )
+            if has_content:
+                logger.info("DOI %s already in DB with content (status: %s)", doi, existing["status"])
+            else:
+                # Paper is in DB but has no content — re-run fetch to try scraping
+                logger.info("DOI %s in DB but no content, re-fetching...", doi)
+                paper_id = self._fetch_and_store(conn, doi) or paper_id
         else:
             paper_id = self._fetch_and_store(conn, doi)
 
@@ -81,9 +90,9 @@ class AnalysisWorker:
                     "doi": doi,
                     "paper_id": paper_id,
                     "status": "error",
-                    "message": "No abstract or full text available for this paper. "
-                               "CrossRef, Semantic Scholar, and PubMed all lack content. "
-                               "The paper may require manual content entry or is behind a paywall.",
+                    "message": "No content found for this paper. "
+                               "Tried CrossRef, Semantic Scholar, PubMed, and the publisher page. "
+                               "The paper may be behind a paywall with no open-access version.",
                     "steps": [],
                 }
             try:
@@ -213,8 +222,70 @@ class AnalysisWorker:
             except Exception as exc:
                 logger.warning("PubMed fallback failed for %s: %s", doi, exc)
 
+        # ── Step 4: Scrape publisher page via DOI redirect ──────────────────
         if not abstract:
-            logger.warning("No abstract found for DOI %s after CrossRef + S2 + PubMed", doi)
+            try:
+                # Follow doi.org redirect to get publisher URL
+                doi_resp = httpx.get(
+                    f"https://doi.org/{doi}",
+                    timeout=20,
+                    follow_redirects=True,
+                    headers={
+                        "User-Agent": "Mozilla/5.0 (compatible; Decoded-Research/1.0; mailto:research@thedecodedhuman.com)",
+                        "Accept": "text/html,application/xhtml+xml",
+                    },
+                )
+                if doi_resp.status_code == 200:
+                    html = doi_resp.text
+                    publisher_url = str(doi_resp.url)
+                    logger.info("DOI resolved to: %s", publisher_url)
+
+                    # Try meta tags in priority order
+                    meta_patterns = [
+                        r'<meta\s+name=["\']citation_abstract["\']\s+content=["\'](.*?)["\']',
+                        r'<meta\s+content=["\'](.*?)["\']\s+name=["\']citation_abstract["\']',
+                        r'<meta\s+name=["\']dc\.description["\']\s+content=["\'](.*?)["\']',
+                        r'<meta\s+name=["\']DC\.Description["\']\s+content=["\'](.*?)["\']',
+                        r'<meta\s+property=["\']og:description["\']\s+content=["\'](.*?)["\']',
+                        r'<meta\s+name=["\']description["\']\s+content=["\'](.*?)["\']',
+                    ]
+                    for pattern in meta_patterns:
+                        m = re.search(pattern, html, re.IGNORECASE | re.DOTALL)
+                        if m:
+                            candidate = re.sub(r"<[^>]+>", "", m.group(1)).strip()
+                            # Reject generic site descriptions (too short or no scientific content)
+                            if len(candidate) > 100:
+                                abstract = candidate
+                                logger.info("Scraped abstract from meta tag (%s) at %s", pattern[:30], publisher_url)
+                                break
+
+                    # Fallback: look for structured abstract in HTML body
+                    if not abstract:
+                        # Common abstract container patterns
+                        body_patterns = [
+                            r'<(?:div|section|p)[^>]*(?:class|id)=["\'][^"\']*abstract[^"\']*["\'][^>]*>(.*?)</(?:div|section|p)>',
+                            r'<abstract[^>]*>(.*?)</abstract>',
+                        ]
+                        for pattern in body_patterns:
+                            m = re.search(pattern, html, re.IGNORECASE | re.DOTALL)
+                            if m:
+                                candidate = re.sub(r"<[^>]+>", "", m.group(1)).strip()
+                                if len(candidate) > 100:
+                                    abstract = candidate[:5000]  # cap at 5k chars
+                                    logger.info("Scraped abstract from HTML body at %s", publisher_url)
+                                    break
+
+                    # If we still don't have a title, try og:title
+                    if title == "Unknown":
+                        m = re.search(r'<meta\s+property=["\']og:title["\']\s+content=["\'](.*?)["\']', html, re.IGNORECASE)
+                        if m:
+                            title = m.group(1).strip()
+
+            except Exception as exc:
+                logger.warning("Publisher page scrape failed for %s: %s", doi, exc)
+
+        if not abstract:
+            logger.warning("No abstract found for DOI %s after CrossRef + S2 + PubMed + scrape", doi)
 
         # ── Upsert into raw_papers ──────────────────────────────────────────
         try:
