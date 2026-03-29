@@ -609,6 +609,7 @@ def _run_doi_analysis(doi: str, priority: int = 0) -> None:
 @app.post("/bridge")
 def bridge_query(request: BridgeRequest):
     """On-demand bridge query: find/build connection between two concepts."""
+    import json as _json
     from decoded.connect.worker import BridgeQueryWorker
     worker = BridgeQueryWorker()
     result = worker.query(
@@ -616,8 +617,40 @@ def bridge_query(request: BridgeRequest):
         concept_b=request.concept_b,
         max_hops=request.max_hops,
     )
-    # Serialize for JSON response
     graph_paths = result.get("graph_paths", [])
+    hypothesis_text = result.get("hypothesis", {}).get("hypothesis") if result.get("hypothesis") else None
+    cost = result.get("hypothesis", {}).get("cost_usd", 0) if result.get("hypothesis") else 0
+    path_found = len(graph_paths) > 0 or bool(hypothesis_text)
+    path_type = "graph_traversal" if graph_paths else ("llm_hypothesis" if hypothesis_text else "none")
+
+    # Cache result for future identical queries
+    try:
+        a, b = sorted([request.concept_a.lower().strip(), request.concept_b.lower().strip()])
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO bridge_results
+                (concept_a, concept_b, path_found, path_type, path_data, hypothesis, cost_usd)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (concept_a, concept_b)
+            DO UPDATE SET
+                query_count = bridge_results.query_count + 1,
+                path_found = EXCLUDED.path_found,
+                path_type = EXCLUDED.path_type,
+                path_data = EXCLUDED.path_data,
+                hypothesis = EXCLUDED.hypothesis,
+                cost_usd = EXCLUDED.cost_usd
+            """,
+            (a, b, path_found, path_type,
+             _json.dumps(graph_paths[:5]) if graph_paths else None,
+             hypothesis_text, cost),
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
     return {
         "concept_a": result["concept_a"],
         "concept_b": result["concept_b"],
@@ -628,8 +661,8 @@ def bridge_query(request: BridgeRequest):
         "papers_a_count": len(result.get("papers_a", [])),
         "papers_b_count": len(result.get("papers_b", [])),
         "similar_papers": result.get("similar_papers", [])[:5],
-        "hypothesis": result.get("hypothesis", {}).get("hypothesis") if result.get("hypothesis") else None,
-        "cost_usd": result.get("hypothesis", {}).get("cost_usd", 0) if result.get("hypothesis") else 0,
+        "hypothesis": hypothesis_text,
+        "cost_usd": cost,
     }
 
 
@@ -1076,22 +1109,28 @@ def stats_v1():
     cur.execute("SELECT count(*) as n FROM paper_critiques")
     total_critiques = cur.fetchone()["n"]
 
-    cur.execute("SELECT count(*) as n FROM paper_critiques WHERE overall_quality >= 7")
+    cur.execute("SELECT count(*) as n FROM paper_critiques WHERE overall_quality = 'high'")
     high_quality_critiques = cur.fetchone()["n"]
 
-    # Count entities and claims from extraction_results JSONB
+    # Count entities from extraction_results JSONB
     cur.execute("""
-        SELECT
-            COALESCE(SUM(jsonb_array_length(entities::jsonb)), 0) as total_entities,
-            COALESCE(SUM(jsonb_array_length(claims::jsonb)), 0) as total_claims
+        SELECT COALESCE(SUM(jsonb_array_length(entities::jsonb)), 0) as total_entities
         FROM extraction_results
-        WHERE entities IS NOT NULL AND claims IS NOT NULL
-          AND entities != 'null' AND claims != 'null'
-          AND entities::text LIKE '[%' AND claims::text LIKE '[%'
+        WHERE entities IS NOT NULL AND entities != 'null' AND entities::text LIKE '[%'
     """)
-    row = cur.fetchone()
-    total_entities = int(row["total_entities"] or 0)
-    total_claims = int(row["total_claims"] or 0)
+    total_entities = int(cur.fetchone()["total_entities"] or 0)
+
+    # Count claims from dedicated table (fallback to JSONB count)
+    cur.execute("SELECT count(*) as n FROM claims")
+    claims_row = cur.fetchone()
+    total_claims = int(claims_row["n"]) if claims_row and claims_row["n"] else 0
+
+    # Convergence zones and field gaps
+    cur.execute("SELECT count(*) as n FROM convergence_zones")
+    convergence_zones = cur.fetchone()["n"]
+
+    cur.execute("SELECT count(*) as n FROM field_gaps")
+    field_gaps_count = cur.fetchone()["n"]
 
     cur.execute("SELECT connection_type, count(*) as n FROM discovered_connections WHERE connection_type != 'replicates' GROUP BY connection_type ORDER BY n DESC")
     connection_types = {r["connection_type"]: r["n"] for r in cur.fetchall()}
@@ -1121,6 +1160,8 @@ def stats_v1():
         "high_quality_critiques": high_quality_critiques,
         "entities": total_entities,
         "claims": total_claims,
+        "convergence_zones": convergence_zones,
+        "field_gaps": field_gaps_count,
         "graph": {"nodes": graph_nodes, "relationships": graph_relationships},
     }
 
@@ -1488,6 +1529,161 @@ def get_convergences_v1(
 
     conn.close()
     return {"convergences": rows, "count": len(rows)}
+
+
+# ---------------------------------------------------------------------------
+# v1/papers/{id}/missed-citations — papers connected but not cited
+# ---------------------------------------------------------------------------
+
+@app.get("/v1/papers/{paper_id}/missed-citations")
+def get_missed_citations(paper_id: str):
+    """Papers connected in the graph but not in each other's reference lists."""
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+    # Get connected papers
+    cur.execute(
+        """
+        SELECT
+            CASE WHEN dc.paper_a_id = %s THEN dc.paper_b_id ELSE dc.paper_a_id END as other_id,
+            dc.connection_type,
+            dc.description,
+            dc.confidence,
+            dc.novelty_score
+        FROM discovered_connections dc
+        WHERE (dc.paper_a_id = %s OR dc.paper_b_id = %s)
+          AND dc.connection_type != 'replicates'
+        ORDER BY dc.novelty_score DESC NULLS LAST, dc.confidence DESC
+        LIMIT 50
+        """,
+        (paper_id, paper_id, paper_id),
+    )
+    connected = {str(r["other_id"]): dict(r) for r in cur.fetchall()}
+
+    if not connected:
+        conn.close()
+        return {"missed_citations": []}
+
+    # Get reference DOIs for the source paper
+    cur.execute(
+        "SELECT references_list FROM raw_papers WHERE id = %s LIMIT 1",
+        (paper_id,),
+    )
+    row = cur.fetchone()
+    refs_raw = row["references_list"] if row else None
+    cited_dois = set()
+    if refs_raw:
+        try:
+            refs = refs_raw if isinstance(refs_raw, list) else __import__('json').loads(refs_raw)
+            for r in refs:
+                if isinstance(r, dict) and r.get("doi"):
+                    cited_dois.add(r["doi"].lower().strip())
+        except Exception:
+            pass
+
+    # Get metadata for connected papers, filter out already-cited ones
+    other_ids = list(connected.keys())
+    placeholders = ",".join(["%s"] * len(other_ids))
+    cur.execute(
+        f"""
+        SELECT id, title, doi, journal, pub_year
+        FROM raw_papers
+        WHERE id IN ({placeholders})
+        """,
+        other_ids,
+    )
+    papers = {str(r["id"]): dict(r) for r in cur.fetchall()}
+
+    missed = []
+    for oid, conn_data in connected.items():
+        paper = papers.get(oid)
+        if not paper:
+            continue
+        doi = (paper.get("doi") or "").lower().strip()
+        if doi and doi in cited_dois:
+            continue  # Already cited — not a missed citation
+        missed.append({
+            "id": oid,
+            "title": paper.get("title"),
+            "doi": paper.get("doi"),
+            "journal": paper.get("journal"),
+            "year": paper.get("pub_year"),
+            "connection_type": conn_data["connection_type"],
+            "description": conn_data["description"],
+            "confidence": float(conn_data["confidence"] or 0),
+            "novelty_score": float(conn_data["novelty_score"] or 0) if conn_data["novelty_score"] else None,
+        })
+
+    missed.sort(key=lambda x: (-(x["novelty_score"] or 0), -(x["confidence"] or 0)))
+    conn.close()
+    return {"missed_citations": missed[:20], "total": len(missed)}
+
+
+# ---------------------------------------------------------------------------
+# v1/gaps — structured field gaps from table (falls back to computed gaps)
+# ---------------------------------------------------------------------------
+
+@app.get("/v1/gaps")
+def get_structured_gaps(
+    discipline: str | None = Query(None),
+    importance: str | None = Query(None),
+    limit: int = Query(50, le=100),
+):
+    """Structured field gaps discovered from graph negative space."""
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+    where = ["1=1"]
+    params: list = []
+    if discipline:
+        where.append("discipline = %s")
+        params.append(discipline)
+    if importance:
+        where.append("importance = %s")
+        params.append(importance)
+    params.append(limit)
+
+    cur.execute(
+        f"""
+        SELECT * FROM field_gaps
+        WHERE {" AND ".join(where)}
+        ORDER BY
+            CASE importance WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
+            discovered_at DESC
+        LIMIT %s
+        """,
+        params,
+    )
+    rows = [_jsonify_row(dict(r)) for r in cur.fetchall()]
+    conn.close()
+    return {"gaps": rows, "count": len(rows)}
+
+
+# ---------------------------------------------------------------------------
+# Bridge result caching — store/retrieve bridge query results
+# ---------------------------------------------------------------------------
+
+@app.get("/v1/bridge/{concept_a}/{concept_b}")
+def get_cached_bridge(concept_a: str, concept_b: str):
+    """Retrieve a cached bridge result if it exists."""
+    a, b = sorted([concept_a.lower().strip(), concept_b.lower().strip()])
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute(
+        "SELECT * FROM bridge_results WHERE concept_a = %s AND concept_b = %s",
+        (a, b),
+    )
+    row = cur.fetchone()
+    if row:
+        cur.execute(
+            "UPDATE bridge_results SET query_count = query_count + 1 WHERE id = %s",
+            (str(row["id"]),),
+        )
+        conn.commit()
+    conn.close()
+    if not row:
+        raise HTTPException(status_code=404, detail="No cached bridge result")
+    return _jsonify_row(dict(row))
 
 
 # ---------------------------------------------------------------------------

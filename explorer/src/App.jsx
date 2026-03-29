@@ -22,7 +22,7 @@ import AboutPage from './pages/AboutPage.jsx'
 // ---------------------------------------------------------------------------
 
 function FeaturedBrief({ brief }) {
-  const quality = parseFloat(brief.overall_quality) || 0
+  const qualityColor = brief.overall_quality === 'high' ? '#4ade80' : '#fbbf24'
   return (
     <Link to={`/papers/${brief.paper_id}`} style={{ textDecoration: 'none' }}>
       <div
@@ -34,13 +34,15 @@ function FeaturedBrief({ brief }) {
           <div style={{ fontSize: '13px', fontWeight: '600', color: '#c4bef8', lineHeight: '1.4', flex: 1 }}>
             {brief.paper_title}
           </div>
-          <div style={{ fontSize: '16px', fontWeight: '700', color: quality >= 7 ? '#4ade80' : '#fbbf24', flexShrink: 0 }}>
-            {quality.toFixed(0)}
-          </div>
+          {brief.overall_quality && (
+            <div style={{ fontSize: '11px', fontWeight: '700', color: qualityColor, flexShrink: 0, textTransform: 'uppercase' }}>
+              {brief.overall_quality}
+            </div>
+          )}
         </div>
-        {brief.connections_summary && (
+        {brief.brief && (
           <p style={{ fontSize: '12px', color: '#6b7280', margin: '6px 0 0', lineHeight: '1.5', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
-            {brief.connections_summary}
+            {brief.brief}
           </p>
         )}
       </div>
@@ -64,8 +66,8 @@ function HomePage({ stats, featuredBriefs }) {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginBottom: '48px' }}>
           {[
             { label: 'Total Papers', value: stats.papers?.total?.toLocaleString(), color: '#7c6af7' },
-            { label: 'Extracted', value: (stats.papers?.by_status?.extracted || 0).toLocaleString(), color: '#4ade80' },
             { label: 'Connections', value: stats.connections?.total?.toLocaleString(), color: '#fbbf24' },
+            { label: 'Claims Extracted', value: stats.claims?.toLocaleString(), color: '#4ade80' },
             { label: 'Intelligence Briefs', value: stats.critiques?.toLocaleString(), color: '#60a5fa' },
           ].map(({ label, value, color }) => (
             <div key={label} style={{ ...s.card, textAlign: 'center', padding: '24px' }}>
@@ -197,7 +199,7 @@ export default function App() {
   const [featuredBriefs, setFeaturedBriefs] = useState(null)
 
   useEffect(() => {
-    fetch(`${API}/stats`).then(r => r.json()).then(setStats).catch(() => {})
+    fetch(`${API}/v1/stats`).then(r => r.json()).then(setStats).catch(() => {})
     fetch(`${API}/critiques?limit=5&quality=high`).then(r => r.json())
       .then(d => setFeaturedBriefs(d.critiques || []))
       .catch(() => {})
