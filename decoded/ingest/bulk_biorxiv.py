@@ -410,15 +410,25 @@ async def _fetch_and_parse_fulltext(
         if not jatsxml_url:
             return None
 
-        await asyncio.sleep(0.3)  # polite delay
+        await asyncio.sleep(1.0)  # polite delay before XML download
 
-        # Step 2: download the XML
-        try:
-            resp = await client.get(jatsxml_url, timeout=60, follow_redirects=True)
-            resp.raise_for_status()
-            xml_bytes = resp.content
-        except Exception as exc:
-            logger.debug("XML download failed for %s: %s", doi, exc)
+        # Step 2: download the XML with retry on 429
+        xml_bytes = None
+        for attempt in range(4):
+            try:
+                resp = await client.get(jatsxml_url, timeout=60, follow_redirects=True)
+                if resp.status_code == 429:
+                    wait = 30 * (2 ** attempt)  # 30s, 60s, 120s, 240s
+                    logger.info("429 on XML download for %s, waiting %ds (attempt %d)", doi, wait, attempt + 1)
+                    await asyncio.sleep(wait)
+                    continue
+                resp.raise_for_status()
+                xml_bytes = resp.content
+                break
+            except Exception as exc:
+                logger.debug("XML download failed for %s: %s", doi, exc)
+                break
+        if xml_bytes is None:
             return None
 
         # Step 3: parse with existing JATS parser
