@@ -1540,11 +1540,11 @@ def _run_doi_analysis_tracked(job_id: str, doi: str, priority: int = 1) -> None:
 
         paper_id = result.get("paper_id")
         # Store rich report data in job for frontend to read
-        with _jobs_lock:
-            if job_id in _analyze_jobs:
-                _analyze_jobs[job_id]["connections"] = result.get("connections", [])
-                _analyze_jobs[job_id]["connection_count"] = result.get("connection_count", 0)
-                _analyze_jobs[job_id]["brief"] = result.get("brief")
+        data = _get_analyze_job(job_id) or {}
+        data["connections"] = result.get("connections", [])
+        data["connection_count"] = result.get("connection_count", 0)
+        data["brief"] = result.get("brief")
+        _set_analyze_job(job_id, data)
         _update("done", status="complete", paper_id=paper_id)
     except Exception as exc:
         logger.error("Tracked DOI analysis failed for %s: %s", doi, exc, exc_info=True)
