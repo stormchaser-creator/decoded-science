@@ -264,10 +264,24 @@ export default function PaperDetailPage() {
           )}
 
           {/* Intelligence Brief */}
-          {critique && (
+          {critique && critique.brief_confidence === 'insufficient' && (
+            <div style={{ ...s.card, marginTop: '12px', padding: '20px' }}>
+              <div style={s.sectionTitle}>Intelligence Brief</div>
+              <div style={{ background: '#1a1500', border: '1px solid #3d2e00', borderRadius: '8px', padding: '16px', marginTop: '12px', textAlign: 'center' }}>
+                <div style={{ fontSize: '24px', marginBottom: '8px' }}>&#9888;</div>
+                <div style={{ fontSize: '13px', color: '#fbbf24', fontWeight: '600', marginBottom: '6px' }}>Insufficient Data for Analysis</div>
+                <div style={{ fontSize: '12px', color: '#9991d0', lineHeight: '1.6' }}>
+                  This paper {paper.data_source === 'abstract_only' ? 'only has an abstract available — no full text was found' : 'has limited extracted data'}.
+                  The system requires enough entities and claims to generate a reliable intelligence brief.
+                  {paper.source === 'medrxiv' || paper.source === 'biorxiv' ? ' Full text may become available as preprint servers update.' : ''}
+                </div>
+              </div>
+            </div>
+          )}
+          {critique && critique.brief_confidence !== 'insufficient' && (
             <div style={{ ...s.card, marginTop: '12px', padding: '20px' }}>
               {/* Data quality warning */}
-              {(critique.brief_confidence === 'low' || critique.brief_confidence === 'insufficient' || (!critique.brief_confidence && paper.data_source === 'abstract_only')) && (
+              {(critique.brief_confidence === 'low' || (!critique.brief_confidence && paper.data_source === 'abstract_only')) && (
                 <div style={{ background: '#1a1500', border: '1px solid #3d2e00', borderRadius: '6px', padding: '10px 14px', marginBottom: '14px', fontSize: '12px', color: '#fbbf24', lineHeight: '1.6' }}>
                   This analysis was generated from {paper.data_source === 'abstract_only' ? 'the abstract only — full paper text was not available' : 'limited data'}. Scores and assessments may not reflect the full paper.
                 </div>

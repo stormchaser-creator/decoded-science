@@ -443,7 +443,7 @@ def list_critiques(
                 WHERE dc.paper_a_id = pc.paper_id OR dc.paper_b_id = pc.paper_id) as connection_count
         FROM paper_critiques pc
         JOIN raw_papers p ON p.id = pc.paper_id
-        WHERE 1=1 {quality_filter}
+        WHERE COALESCE(pc.brief_confidence, '') != 'insufficient' {quality_filter}
         ORDER BY pc.methodology_score DESC NULLS LAST, pc.created_at DESC
         LIMIT %s OFFSET %s
         """,
@@ -451,7 +451,7 @@ def list_critiques(
     )
     rows = [_jsonify_row(dict(r)) for r in cur.fetchall()]
 
-    count_query = f"SELECT COUNT(*) as n FROM paper_critiques pc WHERE 1=1 {quality_filter}"
+    count_query = f"SELECT COUNT(*) as n FROM paper_critiques pc WHERE COALESCE(pc.brief_confidence, '') != 'insufficient' {quality_filter}"
     cur.execute(count_query)
     total = cur.fetchone()["n"]
     release_db(conn)
