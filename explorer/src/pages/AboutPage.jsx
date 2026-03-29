@@ -1,5 +1,5 @@
 import React from 'react'
-import { s } from '../shared.js'
+import { s, useIsMobile } from '../shared.js'
 
 function Section({ title, children }) {
   return (
@@ -43,8 +43,10 @@ function StepCard({ number, title, children }) {
 }
 
 export default function AboutPage() {
+  const isMobile = useIsMobile()
+  const grid2 = { display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '12px' }
   return (
-    <div style={{ ...s.page, maxWidth: '780px', margin: '0 auto' }}>
+    <div style={{ ...s.page, maxWidth: '780px', margin: '0 auto', padding: isMobile ? '16px' : '24px' }}>
       {/* Hero */}
       <div style={{ textAlign: 'center', paddingTop: '48px', marginBottom: '56px' }}>
         <div style={{ fontSize: '40px', marginBottom: '16px' }}>⬡</div>
@@ -106,7 +108,7 @@ export default function AboutPage() {
       </Section>
 
       <Section title="What It Does for You">
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+        <div style={{ ...grid2 }}>
           {[
             { icon: '🔗', title: 'Find connections you couldn\'t find alone', desc: 'Search for a topic and see not just papers, but the network of relationships surrounding it. The system surfaces papers from other disciplines that share your mechanisms, entities, or findings — connections that don\'t appear in citation records.' },
             { icon: '🎯', title: 'See where evidence converges', desc: 'When multiple papers from independent labs in different disciplines arrive at compatible conclusions, that\'s a convergence signal — stronger evidence than any single paper. The connectome identifies these patterns automatically.' },
@@ -146,7 +148,7 @@ export default function AboutPage() {
       </Section>
 
       <Section title="What This Is Not">
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+        <div style={{ ...grid2 }}>
           {[
             { label: 'Not a search engine', desc: 'PubMed and Google Scholar search the literature. We build the network between papers that search can\'t see.' },
             { label: 'Not a recommendation engine', desc: 'ResearchRabbit recommends papers you might like. We discover structural relationships in the knowledge itself.' },

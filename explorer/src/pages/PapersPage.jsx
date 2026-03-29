@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
-import { API, s } from '../shared.js'
+import { API, s, useIsMobile } from '../shared.js'
 import { ErrorMsg } from '../components/ui.jsx'
 
 const PAGE_SIZE = 50
 
 export default function PapersPage() {
+  const isMobile = useIsMobile()
   const [papers, setPapers] = useState([])
   const [searchQ, setSearchQ] = useState('')
   const [loading, setLoading] = useState(false)
@@ -42,8 +43,8 @@ export default function PapersPage() {
   const handleClear = () => { setSearchQ(''); setSkip(0); loadPapers('', 0) }
 
   return (
-    <div style={s.twoCol}>
-      <aside style={s.sidebar}>
+    <div style={isMobile ? { display: 'flex', flexDirection: 'column' } : s.twoCol}>
+      <aside style={isMobile ? { padding: '16px', borderBottom: '1px solid #1e1e2e', background: '#0d0d18' } : s.sidebar}>
         <div style={s.sectionTitle}>Search Papers</div>
         <input
           style={s.input}
@@ -64,7 +65,7 @@ export default function PapersPage() {
           </div>
         )}
       </aside>
-      <main style={s.content}>
+      <main style={isMobile ? { padding: '16px', overflowY: 'auto' } : s.content}>
         {error && <ErrorMsg msg={error} />}
         <div style={{ fontSize: '13px', color: '#6b7280', marginBottom: '14px' }}>
           {loading ? 'Loading…' : isSearch ? `${papers.length} results` : `${total} extracted papers`}

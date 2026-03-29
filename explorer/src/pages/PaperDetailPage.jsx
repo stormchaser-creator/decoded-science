@@ -216,12 +216,20 @@ export default function PaperDetailPage() {
           {mechanisms.length > 0 && (
             <div style={{ ...s.card, marginTop: '12px' }}>
               <div style={{ ...s.sectionTitle, marginBottom: '8px' }}>Mechanisms ({mechanisms.length})</div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                {mechanisms.map((m, i) => (
-                  <span key={i} style={{ ...s.tag, borderLeft: `3px solid ${EPISTEMIC.hypothesis}`, marginTop: 0, color: '#93c5fd', background: '#0a0a20' }}>
-                    {typeof m === 'string' ? m : (m.description || m.name || m.text || JSON.stringify(m))}
-                  </span>
-                ))}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                {mechanisms.map((m, i) => {
+                  const desc = typeof m === 'string' ? m : (m.description || m.name || m.text || null)
+                  if (!desc) return null
+                  const subtext = typeof m === 'object' && m.upstream_entity && m.downstream_entity
+                    ? `${m.upstream_entity} → ${m.interaction_type || 'affects'} → ${m.downstream_entity}`
+                    : null
+                  return (
+                    <div key={i} style={{ borderLeft: `3px solid ${EPISTEMIC.hypothesis}`, paddingLeft: '10px', paddingTop: '4px', paddingBottom: '4px' }}>
+                      <div style={{ fontSize: '13px', color: '#93c5fd', lineHeight: '1.6' }}>{desc}</div>
+                      {subtext && <div style={{ fontSize: '11px', color: '#4b5563', marginTop: '2px', fontFamily: 'monospace' }}>{subtext}</div>}
+                    </div>
+                  )
+                })}
               </div>
             </div>
           )}
@@ -258,8 +266,8 @@ export default function PaperDetailPage() {
           )}
         </div>
 
-        {/* RIGHT COLUMN (sticky) */}
-        <div style={{ position: 'sticky', top: '70px' }}>
+        {/* RIGHT COLUMN (sticky on desktop) */}
+        <div style={isMobile ? {} : { position: 'sticky', top: '70px' }}>
           {/* Mini graph */}
           {connections.length > 0 && (
             <div style={{ ...s.card, marginBottom: '12px', padding: '12px' }}>

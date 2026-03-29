@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { API, s, EPISTEMIC } from '../shared.js'
+import { API, s, EPISTEMIC, useIsMobile } from '../shared.js'
 import { TypeTag, Loading, ErrorMsg } from '../components/ui.jsx'
 
 export default function ConvergencesPage() {
+  const isMobile = useIsMobile()
   const navigate = useNavigate()
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
@@ -26,8 +27,8 @@ export default function ConvergencesPage() {
   useEffect(() => { load() }, [load])
 
   return (
-    <div style={s.twoCol}>
-      <aside style={s.sidebar}>
+    <div style={isMobile ? { display: 'flex', flexDirection: 'column' } : s.twoCol}>
+      <aside style={isMobile ? { padding: '16px', borderBottom: '1px solid #1e1e2e', background: '#0d0d18' } : s.sidebar}>
         <div style={s.sectionTitle}>Convergence Zones</div>
         <p style={{ fontSize: '12px', color: '#6b7280', lineHeight: '1.6', marginBottom: '16px' }}>
           Papers at the intersection of multiple high-confidence connections — research zones where evidence accumulates.
@@ -52,7 +53,7 @@ export default function ConvergencesPage() {
           </p>
         </div>
       </aside>
-      <main style={s.content}>
+      <main style={isMobile ? { padding: '16px' } : s.content}>
         {error && <ErrorMsg msg={error} />}
         {loading && <Loading />}
         {!loading && items.length === 0 && (
