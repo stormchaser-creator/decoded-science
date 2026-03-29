@@ -1,4 +1,16 @@
+import { useState, useEffect } from 'react'
+
 export const API = import.meta.env.VITE_API_URL || '/api'
+
+export function useIsMobile(breakpoint = 768) {
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < breakpoint)
+  useEffect(() => {
+    const handler = () => setIsMobile(window.innerWidth < breakpoint)
+    window.addEventListener('resize', handler)
+    return () => window.removeEventListener('resize', handler)
+  }, [breakpoint])
+  return isMobile
+}
 
 // Epistemic color system (Step 4)
 export const EPISTEMIC = {

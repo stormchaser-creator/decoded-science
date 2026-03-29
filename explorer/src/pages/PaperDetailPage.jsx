@@ -1,6 +1,6 @@
 import React, { useState, useEffect, Suspense } from 'react'
 import { Link, useParams, useNavigate } from 'react-router-dom'
-import { API, s, parseJsonField, connectionEpistemicColor, EPISTEMIC } from '../shared.js'
+import { API, s, parseJsonField, connectionEpistemicColor, EPISTEMIC, useIsMobile } from '../shared.js'
 import { TypeTag, StrengthBar, Loading, ErrorMsg } from '../components/ui.jsx'
 
 const ForceGraph2D = React.lazy(() => import('react-force-graph-2d'))
@@ -81,6 +81,7 @@ function ClaimItem({ claim }) {
 
 export default function PaperDetailPage() {
   const { id } = useParams()
+  const isMobile = useIsMobile()
   const [paper, setPaper] = useState(null)
   const [connections, setConnections] = useState([])
   const [critique, setCritique] = useState(null)
@@ -117,10 +118,10 @@ export default function PaperDetailPage() {
   const sortedConns = [...connections].sort((a, b) => (b.novelty_score || 0) - (a.novelty_score || 0))
 
   return (
-    <div style={{ ...s.page, maxWidth: '1200px' }}>
-      <Link to="/papers" style={s.btnOutline}>← Back to papers</Link>
+    <div style={{ ...s.page, maxWidth: '1200px', padding: isMobile ? '16px' : '24px' }}>
+      <Link to="/papers" style={s.btnOutline}>← Back</Link>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '65% 35%', gap: '20px', marginTop: '16px', alignItems: 'start' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '65% 35%', gap: '20px', marginTop: '16px', alignItems: 'start' }}>
 
         {/* LEFT COLUMN */}
         <div>

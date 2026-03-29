@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Link, NavLink, useNavigate } from 'react-router-dom'
-import { API, s } from './shared.js'
+import { API, s, useIsMobile } from './shared.js'
 import { AuthProvider, useAuth } from './auth.jsx'
 import { navLinkStyle } from './components/ui.jsx'
 
@@ -51,11 +51,12 @@ function FeaturedBrief({ brief }) {
 }
 
 function HomePage({ stats, featuredBriefs }) {
+  const isMobile = useIsMobile()
   return (
-    <div style={{ ...s.page, paddingTop: '48px' }}>
-      <div style={{ textAlign: 'center', maxWidth: '600px', margin: '0 auto 48px' }}>
-        <div style={{ fontSize: '40px', marginBottom: '16px' }}>⬡</div>
-        <h1 style={{ fontSize: '32px', fontWeight: '800', color: '#e0e0e8', margin: '0 0 12px', letterSpacing: '-1px' }}>
+    <div style={{ ...s.page, paddingTop: isMobile ? '24px' : '48px' }}>
+      <div style={{ textAlign: 'center', maxWidth: '600px', margin: `0 auto ${isMobile ? '32px' : '48px'}` }}>
+        <div style={{ fontSize: isMobile ? '32px' : '40px', marginBottom: '16px' }}>⬡</div>
+        <h1 style={{ fontSize: isMobile ? '24px' : '32px', fontWeight: '800', color: '#e0e0e8', margin: '0 0 12px', letterSpacing: '-1px' }}>
           Connectome Explorer
         </h1>
         <p style={{ fontSize: '15px', color: '#6b7280', lineHeight: '1.7', margin: 0 }}>
@@ -63,21 +64,21 @@ function HomePage({ stats, featuredBriefs }) {
         </p>
       </div>
       {stats && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginBottom: '48px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(4, 1fr)', gap: isMobile ? '10px' : '16px', marginBottom: isMobile ? '24px' : '48px' }}>
           {[
             { label: 'Total Papers', value: stats.papers?.total?.toLocaleString(), color: '#7c6af7' },
             { label: 'Connections', value: stats.connections?.total?.toLocaleString(), color: '#fbbf24' },
             { label: 'Claims Extracted', value: stats.claims?.toLocaleString(), color: '#4ade80' },
             { label: 'Intelligence Briefs', value: stats.critiques?.toLocaleString(), color: '#60a5fa' },
           ].map(({ label, value, color }) => (
-            <div key={label} style={{ ...s.card, textAlign: 'center', padding: '24px' }}>
-              <div style={{ ...s.bigStat, color }}>{value || '—'}</div>
-              <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px' }}>{label}</div>
+            <div key={label} style={{ ...s.card, textAlign: 'center', padding: isMobile ? '16px 12px' : '24px' }}>
+              <div style={{ ...s.bigStat, color, fontSize: isMobile ? '22px' : '28px' }}>{value || '—'}</div>
+              <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px' }}>{label}</div>
             </div>
           ))}
         </div>
       )}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '16px', marginBottom: '48px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : '1fr 1fr 1fr', gap: isMobile ? '10px' : '16px', marginBottom: isMobile ? '24px' : '48px' }}>
         {[
           { to: '/papers', icon: '📄', title: 'Papers', desc: 'Browse and search the full paper library with AI-extracted metadata.' },
           { to: '/explore', icon: '⬡', title: 'Graph Explorer', desc: 'Interactive force-directed graph of paper connections, colored by discipline.' },
@@ -88,13 +89,13 @@ function HomePage({ stats, featuredBriefs }) {
         ].map(({ to, icon, title, desc }) => (
           <Link key={to} to={to} style={{ textDecoration: 'none' }}>
             <div
-              style={{ ...s.card, padding: '20px', transition: 'border-color 0.15s' }}
+              style={{ ...s.card, padding: isMobile ? '14px' : '20px', transition: 'border-color 0.15s' }}
               onMouseEnter={e => e.currentTarget.style.borderColor = '#7c6af7'}
               onMouseLeave={e => e.currentTarget.style.borderColor = '#1e1e2e'}
             >
-              <div style={{ fontSize: '24px', marginBottom: '8px' }}>{icon}</div>
-              <div style={{ fontSize: '14px', fontWeight: '600', color: '#c4bef8', marginBottom: '6px' }}>{title}</div>
-              <div style={{ fontSize: '12px', color: '#6b7280', lineHeight: '1.6' }}>{desc}</div>
+              <div style={{ fontSize: isMobile ? '18px' : '24px', marginBottom: '6px' }}>{icon}</div>
+              <div style={{ fontSize: isMobile ? '12px' : '14px', fontWeight: '600', color: '#c4bef8', marginBottom: '4px' }}>{title}</div>
+              {!isMobile && <div style={{ fontSize: '12px', color: '#6b7280', lineHeight: '1.6' }}>{desc}</div>}
             </div>
           </Link>
         ))}
@@ -103,11 +104,11 @@ function HomePage({ stats, featuredBriefs }) {
       {featuredBriefs && featuredBriefs.length > 0 && (
         <div style={{ marginBottom: '48px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-            <h2 style={{ fontSize: '16px', fontWeight: '700', color: '#e0e0e8', margin: 0 }}>Featured Intelligence Briefs</h2>
-            <Link to="/briefs?quality=high" style={{ fontSize: '12px', color: '#7c6af7', textDecoration: 'none' }}>View all high-quality →</Link>
+            <h2 style={{ fontSize: isMobile ? '14px' : '16px', fontWeight: '700', color: '#e0e0e8', margin: 0 }}>Featured Intelligence Briefs</h2>
+            <Link to="/briefs?quality=high" style={{ fontSize: '12px', color: '#7c6af7', textDecoration: 'none' }}>View all →</Link>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-            {featuredBriefs.slice(0, 4).map((b, i) => (
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '12px' }}>
+            {featuredBriefs.slice(0, isMobile ? 2 : 4).map((b, i) => (
               <FeaturedBrief key={b.id || i} brief={b} />
             ))}
           </div>
@@ -121,46 +122,92 @@ function HomePage({ stats, featuredBriefs }) {
 // Header (must be inside BrowserRouter for useNavigate)
 // ---------------------------------------------------------------------------
 
+const NAV_LINKS = [
+  { to: '/papers', label: 'Papers' },
+  { to: '/explore', label: 'Graph' },
+  { to: '/connections', label: 'Connections' },
+  { to: '/convergences', label: 'Convergences' },
+  { to: '/briefs', label: 'Briefs' },
+  { to: '/bridge', label: 'Bridge' },
+  { to: '/analyze', label: 'Analyze' },
+  { to: '/about', label: 'About' },
+]
+
 function Header({ stats }) {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
+  const isMobile = useIsMobile()
+  const [menuOpen, setMenuOpen] = useState(false)
 
   return (
-    <header style={s.header}>
-      <div style={{ flexShrink: 0 }}>
-        <Link to="/" style={s.logo}>⬡ Decoded</Link>
-        <div style={s.tagline}>Literature Connectome</div>
-      </div>
-      <nav style={s.nav}>
-        <NavLink to="/papers" style={navLinkStyle}>Papers</NavLink>
-        <NavLink to="/explore" style={navLinkStyle}>Graph</NavLink>
-        <NavLink to="/connections" style={navLinkStyle}>Connections</NavLink>
-        <NavLink to="/convergences" style={navLinkStyle}>Convergences</NavLink>
-        <NavLink to="/briefs" style={navLinkStyle}>Briefs</NavLink>
-        <NavLink to="/bridge" style={navLinkStyle}>Bridge</NavLink>
-        <NavLink to="/analyze" style={navLinkStyle}>Analyze</NavLink>
-        {user && <NavLink to="/workspace" style={navLinkStyle}>Workspace</NavLink>}
-        <NavLink to="/about" style={navLinkStyle}>About</NavLink>
-      </nav>
-      <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
-        {stats && (
-          <div style={{ ...s.statsBar, marginLeft: 0 }}>
-            <span><b style={{ color: '#7c6af7' }}>{stats.papers?.total?.toLocaleString() || '—'}</b> papers</span>
-            <span><b style={{ color: '#fbbf24' }}>{stats.connections?.total?.toLocaleString() || '—'}</b> connections</span>
-          </div>
-        )}
-        {user ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ fontSize: '12px', color: '#9991d0' }}>{user.name || user.email}</span>
+    <header style={{ ...s.header, flexWrap: 'wrap', padding: isMobile ? '10px 16px' : '12px 24px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: isMobile ? '100%' : 'auto' }}>
+        <div style={{ flexShrink: 0 }}>
+          <Link to="/" style={s.logo} onClick={() => setMenuOpen(false)}>⬡ Decoded</Link>
+          {!isMobile && <div style={s.tagline}>Literature Connectome</div>}
+        </div>
+        {isMobile && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            {user ? (
+              <button style={{ ...s.btnGhost, padding: '4px 10px', fontSize: '12px' }} onClick={() => { logout(); navigate('/'); setMenuOpen(false) }}>Sign out</button>
+            ) : (
+              <Link to="/login" style={{ ...s.btnOutline, fontSize: '12px', padding: '4px 10px' }} onClick={() => setMenuOpen(false)}>Sign in</Link>
+            )}
             <button
-              style={{ ...s.btnGhost, padding: '4px 10px', fontSize: '12px' }}
-              onClick={() => { logout(); navigate('/') }}
-            >Sign out</button>
+              onClick={() => setMenuOpen(v => !v)}
+              style={{ background: 'none', border: '1px solid #1e1e2e', borderRadius: '6px', padding: '6px 10px', cursor: 'pointer', color: '#9991d0', fontSize: '16px', lineHeight: 1 }}
+              aria-label="Toggle menu"
+            >
+              {menuOpen ? '✕' : '☰'}
+            </button>
           </div>
-        ) : (
-          <Link to="/login" style={{ ...s.btnOutline, fontSize: '12px', padding: '4px 10px' }}>Sign in</Link>
         )}
       </div>
+
+      {/* Desktop nav */}
+      {!isMobile && (
+        <nav style={s.nav}>
+          {NAV_LINKS.map(({ to, label }) => (
+            <NavLink key={to} to={to} style={navLinkStyle}>{label}</NavLink>
+          ))}
+          {user && <NavLink to="/workspace" style={navLinkStyle}>Workspace</NavLink>}
+        </nav>
+      )}
+
+      {/* Desktop right side */}
+      {!isMobile && (
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
+          {stats && (
+            <div style={{ ...s.statsBar, marginLeft: 0 }}>
+              <span><b style={{ color: '#7c6af7' }}>{stats.papers?.total?.toLocaleString() || '—'}</b> papers</span>
+              <span><b style={{ color: '#fbbf24' }}>{stats.connections?.total?.toLocaleString() || '—'}</b> connections</span>
+            </div>
+          )}
+          {user ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: '12px', color: '#9991d0' }}>{user.name || user.email}</span>
+              <button style={{ ...s.btnGhost, padding: '4px 10px', fontSize: '12px' }} onClick={() => { logout(); navigate('/') }}>Sign out</button>
+            </div>
+          ) : (
+            <Link to="/login" style={{ ...s.btnOutline, fontSize: '12px', padding: '4px 10px' }}>Sign in</Link>
+          )}
+        </div>
+      )}
+
+      {/* Mobile dropdown nav */}
+      {isMobile && menuOpen && (
+        <nav style={{ width: '100%', borderTop: '1px solid #1e1e2e', paddingTop: '10px', marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+          {NAV_LINKS.map(({ to, label }) => (
+            <NavLink key={to} to={to} style={navLinkStyle} onClick={() => setMenuOpen(false)}>{label}</NavLink>
+          ))}
+          {user && <NavLink to="/workspace" style={navLinkStyle} onClick={() => setMenuOpen(false)}>Workspace</NavLink>}
+          {stats && (
+            <div style={{ padding: '8px 12px', fontSize: '11px', color: '#6b7280', borderTop: '1px solid #1e1e2e', marginTop: '6px' }}>
+              <b style={{ color: '#7c6af7' }}>{stats.papers?.total?.toLocaleString() || '—'}</b> papers · <b style={{ color: '#fbbf24' }}>{stats.connections?.total?.toLocaleString() || '—'}</b> connections
+            </div>
+          )}
+        </nav>
+      )}
     </header>
   )
 }
