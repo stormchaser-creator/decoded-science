@@ -24,9 +24,9 @@ logger = logging.getLogger(__name__)
 
 CRITIQUE_MODEL = "claude-sonnet-4-6"
 
-SYSTEM_PROMPT = """You are an expert scientific reviewer with deep expertise in biomedical research methodology, statistics, and research integrity.
+SYSTEM_PROMPT = """You are an expert scientific analyst who synthesizes research papers within the context of a larger corpus of biomedical literature.
 
-Your role is to produce rigorous, actionable Intelligence Briefs that help researchers quickly assess papers. Be direct, specific, and honest. Flag genuine red flags without hyperbole."""
+Your role is NOT to summarize papers — researchers can read abstracts themselves. Your role is to produce Intelligence Briefs that surface NEW INSIGHTS that only emerge from analyzing this paper alongside its connections to other papers in the corpus. Be direct, specific, and honest."""
 
 
 def _assess_data_quality(paper: dict) -> tuple[str, list[str], list[str]]:
@@ -123,7 +123,9 @@ IMPORTANT: Your assessment can only be as good as the data available. If critica
 - Distinguish between "paper has this weakness" and "I cannot assess this because data is missing"
 """
 
-    return f"""Analyze this scientific paper and produce an Intelligence Brief.
+    n_connections = len(connections) if connections else 0
+
+    return f"""Analyze this scientific paper IN THE CONTEXT of its connections to other papers in our corpus.
 {data_context}
 PAPER DETAILS:
 Title: {paper.get('title', 'Unknown')}
@@ -142,6 +144,23 @@ Key findings extracted by AI:
 {findings_str}
 {conn_str}
 
+CRITICAL INSTRUCTIONS:
+Do NOT just summarize the paper — the researcher can read the abstract themselves.
+Instead, your brief must answer: "What do I learn from this paper that I couldn't learn by reading it alone?"
+
+Your "summary" MUST focus on CORPUS-LEVEL INSIGHTS:
+- How does this paper change the picture when combined with its {n_connections} connected papers?
+- Does it confirm, contradict, or extend findings from connected papers?
+- What questions does it open when read alongside the related work?
+- What patterns emerge from the connections that aren't obvious from this paper alone?
+
+If there are no connections, focus on: what gap does this paper fill in the corpus?
+What existing papers in the corpus should be re-evaluated in light of this one?
+
+Your "strengths" should highlight what this paper ADDS to the corpus (not just "large sample size").
+Your "weaknesses" should highlight where this paper CONFLICTS with or FAILS TO ADDRESS gaps visible from the corpus.
+Your "red_flags" should ONLY contain genuine methodological concerns — NOT extraction artifacts or missing metadata.
+
 Produce your Intelligence Brief in this exact JSON format:
 {{
   "overall_quality": "high|medium|low",
@@ -149,21 +168,19 @@ Produce your Intelligence Brief in this exact JSON format:
   "reproducibility_score": 0.0-10.0,
   "novelty_score": 0.0-10.0,
   "statistical_rigor": 0.0-10.0,
-  "strengths": ["strength 1", "strength 2", "strength 3"],
-  "weaknesses": ["weakness 1", "weakness 2"],
-  "red_flags": ["red flag if any — empty list if none"],
-  "summary": "2-3 sentence executive summary of what this paper found and why it matters",
+  "strengths": ["strength 1 — focus on corpus-level value", "strength 2"],
+  "weaknesses": ["weakness 1 — focus on corpus-level gaps", "weakness 2"],
+  "red_flags": ["ONLY genuine methodological red flags — empty list if none"],
+  "summary": "2-3 sentences: what does this paper mean IN CONTEXT of the connected papers? What new insight emerges from the connections? Do NOT just summarize the paper.",
   "recommendation": "read|skim|skip|replicate|build_on"
 }}
 
 Scoring guide:
 - methodology_score: rigor of study design, controls, sample size (cap at 5.0 if methods not visible)
 - reproducibility_score: clarity of methods, data availability, code sharing
-- novelty_score: how new are the findings relative to known literature
+- novelty_score: how new are the findings RELATIVE TO THE CONNECTED PAPERS in this corpus
 - statistical_rigor: appropriate tests, effect sizes, confidence intervals (cap at 5.0 if stats not visible)
 
-Be direct. If the paper has serious flaws, say so. If it's genuinely excellent, say so.
-If your data is limited, be honest about what you can and cannot assess.
 Return only the JSON, no markdown."""
 
 
