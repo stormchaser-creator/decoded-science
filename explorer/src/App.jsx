@@ -23,6 +23,7 @@ import ExplorePage from './pages/ExplorePage.jsx'
 import WorkspacePage from './pages/WorkspacePage.jsx'
 import { LoginPage, RegisterPage } from './pages/AuthPages.jsx'
 import AboutPage from './pages/AboutPage.jsx'
+import FAQPage from './pages/FAQPage.jsx'
 
 // ---------------------------------------------------------------------------
 // Home page
@@ -171,6 +172,7 @@ const NAV_LINKS = [
   { to: '/bridge', label: 'Bridge' },
   { to: '/analyze', label: 'Analyze' },
   { to: '/about', label: 'About' },
+  { to: '/faq', label: 'FAQ' },
 ]
 
 function Header({ stats }) {
@@ -276,6 +278,7 @@ function AppInner({ stats, featuredBriefs, graphData }) {
         <Route path="/register" element={<RegisterPage />} />
         <Route path="/workspace" element={<WorkspacePage />} />
         <Route path="/about" element={<AboutPage />} />
+        <Route path="/faq" element={<FAQPage />} />
       </Routes>
     </div>
   )
