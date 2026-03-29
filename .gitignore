@@ -44,3 +44,4 @@ logs/
 explorer/node_modules/
 explorer/dist/
 logs/
+data/pmc_bulk/
