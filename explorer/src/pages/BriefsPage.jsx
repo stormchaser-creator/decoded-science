@@ -11,11 +11,11 @@ const QUALITY_FILTERS = [
 ]
 
 function QualityBadge({ score }) {
-  const q = parseFloat(score) || 0
-  if (q >= 7) return (
+  const q = (score || '').toLowerCase()
+  if (q === 'high') return (
     <span style={{ ...s.tag, ...s.tagGreen, marginTop: 0, fontWeight: '700', fontSize: '11px' }}>HIGH</span>
   )
-  if (q >= 5) return (
+  if (q === 'medium') return (
     <span style={{ ...s.tag, ...s.tagYellow, marginTop: 0, fontWeight: '700', fontSize: '11px' }}>MED</span>
   )
   return (
