@@ -81,7 +81,9 @@ def fetch_papers_for_extraction(
             WHERE p.status IN ({placeholders})
               AND e.id IS NULL
               AND p.title IS NOT NULL
+              AND (p.abstract IS NOT NULL AND LENGTH(p.abstract) >= 100)
             ORDER BY
+                CASE WHEN p.full_text IS NOT NULL THEN 0 ELSE 1 END,
                 CASE p.status
                     WHEN 'parsed' THEN 0
                     WHEN 'fetched' THEN 1

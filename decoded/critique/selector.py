@@ -80,7 +80,8 @@ class CritiqueSelector:
                   AND COALESCE(jsonb_array_length(e.claims), 0) >= 2
                   AND NOT EXISTS (
                       SELECT 1 FROM paper_critiques pc
-                      WHERE pc.paper_id = p.id AND pc.model_id = %s
+                      WHERE pc.paper_id = p.id
+                        AND (pc.model_id = %s OR pc.brief_confidence = 'insufficient')
                   )
                 GROUP BY p.id, p.title, p.abstract, p.authors, p.doi, p.journal,
                          p.published_date, p.status, p.data_source,

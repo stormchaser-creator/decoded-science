@@ -1,7 +1,15 @@
-"""LLM cost tracking with per-model pricing."""
+"""LLM cost tracking with per-model pricing and persistent daily budgets.
+
+The key design decision: daily spend is tracked in BOTH Redis (fast checks)
+and PostgreSQL (source of truth).  On startup, each worker reads today's
+actual spend from the DB so that budget limits survive process restarts.
+Redis is used for fast inter-process coordination — if Redis is down,
+workers fall back to DB-only checks.
+"""
 
 from __future__ import annotations
 
+import os
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -40,6 +48,9 @@ MODEL_PRICING: dict[str, TokenPrice] = {
 # Fallback for unknown models
 _DEFAULT_PRICING = TokenPrice(3.00, 15.00)
 
+# Redis key for global daily spend (shared across all workers)
+_REDIS_DAILY_KEY_PREFIX = "decoded:daily_cost:"
+
 
 def calculate_cost(model_id: str, input_tokens: int, output_tokens: int) -> float:
     """Return cost in USD for a single LLM call."""
@@ -64,25 +75,97 @@ class CostRecord:
 
 
 # ---------------------------------------------------------------------------
+# Persistent helpers
+# ---------------------------------------------------------------------------
+
+def _get_redis():
+    """Get Redis connection (cached). Returns None if unavailable."""
+    try:
+        import redis
+        url = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+        return redis.Redis.from_url(url, decode_responses=True, socket_timeout=2)
+    except Exception:
+        return None
+
+
+def _get_today_spend_from_db() -> float:
+    """Query PostgreSQL for today's total LLM spend across all tables."""
+    try:
+        import psycopg2
+        db_url = os.environ.get("DATABASE_URL", "postgresql://localhost/decoded")
+        conn = psycopg2.connect(db_url)
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT COALESCE(SUM(cost), 0) FROM (
+                SELECT cost_usd AS cost FROM extraction_results
+                    WHERE DATE(created_at) = CURRENT_DATE AND cost_usd > 0
+                UNION ALL
+                SELECT cost_usd FROM discovered_connections
+                    WHERE DATE(created_at) = CURRENT_DATE AND cost_usd > 0
+                UNION ALL
+                SELECT cost_usd FROM paper_critiques
+                    WHERE DATE(created_at) = CURRENT_DATE AND cost_usd > 0
+            ) t
+        """)
+        total = float(cur.fetchone()[0])
+        conn.close()
+        return total
+    except Exception as exc:
+        logger.warning("cost_tracker_db_read_failed", error=str(exc))
+        return 0.0
+
+
+def _redis_daily_key() -> str:
+    return _REDIS_DAILY_KEY_PREFIX + datetime.utcnow().strftime("%Y-%m-%d")
+
+
+# ---------------------------------------------------------------------------
 # Tracker
 # ---------------------------------------------------------------------------
 
 @dataclass
 class CostBudget:
-    daily_limit_usd: float = 50.0
-    total_limit_usd: float = 500.0
+    daily_limit_usd: float = 10.0
+    total_limit_usd: float = 100.0
 
 
 class CostTracker:
-    """Thread-safe accumulator for LLM spend across the pipeline."""
+    """Thread-safe accumulator for LLM spend with persistent budget enforcement.
+
+    On init, reads today's actual spend from PostgreSQL so budget limits
+    survive process restarts.  Each record() call also increments a Redis
+    counter so all workers share a single daily total.
+    """
 
     def __init__(self, budget: CostBudget | None = None):
         self._budget = budget or CostBudget()
         self._lock = threading.Lock()
         self._records: list[CostRecord] = []
-        self._total_usd: float = 0.0
+        self._session_usd: float = 0.0       # this process only
         self._by_model: dict[str, float] = {}
         self._by_task: dict[str, float] = {}
+        self._redis = _get_redis()
+
+        # Seed from DB so we know what was already spent today
+        self._prior_today_usd = _get_today_spend_from_db()
+        logger.info(
+            "cost_tracker_init",
+            prior_today_usd=round(self._prior_today_usd, 2),
+            daily_limit=self._budget.daily_limit_usd,
+            total_limit=self._budget.total_limit_usd,
+        )
+
+        # Sync Redis counter to DB truth (if Redis is behind)
+        if self._redis:
+            try:
+                key = _redis_daily_key()
+                current = float(self._redis.get(key) or 0)
+                if current < self._prior_today_usd:
+                    # Redis is behind (maybe it was flushed) — set to DB value
+                    self._redis.set(key, str(self._prior_today_usd))
+                    self._redis.expire(key, 90000)  # ~25 hours TTL
+            except Exception:
+                pass
 
     # ------------------------------------------------------------------
     # Recording
@@ -107,9 +190,16 @@ class CostTracker:
         )
         with self._lock:
             self._records.append(record)
-            self._total_usd += cost
+            self._session_usd += cost
             self._by_model[model_id] = self._by_model.get(model_id, 0.0) + cost
             self._by_task[task] = self._by_task.get(task, 0.0) + cost
+
+        # Atomically increment Redis daily counter
+        if self._redis:
+            try:
+                self._redis.incrbyfloat(_redis_daily_key(), cost)
+            except Exception:
+                pass  # Redis failure is non-fatal; DB is truth
 
         logger.info(
             "llm_cost",
@@ -118,7 +208,8 @@ class CostTracker:
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             cost_usd=round(cost, 6),
-            total_usd=round(self._total_usd, 4),
+            session_usd=round(self._session_usd, 4),
+            today_usd=round(self.today_usd, 2),
         )
         return record
 
@@ -126,33 +217,50 @@ class CostTracker:
     # Budget checks
     # ------------------------------------------------------------------
 
+    @property
+    def today_usd(self) -> float:
+        """Today's total spend: prior (from DB at init) + this session."""
+        # Try Redis first (includes all workers)
+        if self._redis:
+            try:
+                val = self._redis.get(_redis_daily_key())
+                if val is not None:
+                    return float(val)
+            except Exception:
+                pass
+        # Fallback: DB seed + this session
+        return self._prior_today_usd + self._session_usd
+
+    @property
+    def total_usd(self) -> float:
+        return self._session_usd
+
     def check_budget(self) -> tuple[bool, str]:
         """Return (ok, reason). ok=False means budget exceeded."""
-        with self._lock:
-            if self._total_usd >= self._budget.total_limit_usd:
-                return False, f"Total budget exceeded: ${self._total_usd:.2f} >= ${self._budget.total_limit_usd}"
-            today_cost = self._today_cost()
-            if today_cost >= self._budget.daily_limit_usd:
-                return False, f"Daily budget exceeded: ${today_cost:.2f} >= ${self._budget.daily_limit_usd}"
+        today = self.today_usd
+        if today >= self._budget.daily_limit_usd:
+            return False, (
+                f"Daily budget exceeded: ${today:.2f} >= "
+                f"${self._budget.daily_limit_usd:.2f} "
+                f"(across all workers today)"
+            )
+        if self._session_usd >= self._budget.total_limit_usd:
+            return False, (
+                f"Session budget exceeded: ${self._session_usd:.2f} >= "
+                f"${self._budget.total_limit_usd}"
+            )
         return True, "ok"
-
-    def _today_cost(self) -> float:
-        today = datetime.utcnow().date()
-        return sum(r.cost_usd for r in self._records if r.timestamp.date() == today)
 
     # ------------------------------------------------------------------
     # Reporting
     # ------------------------------------------------------------------
 
-    @property
-    def total_usd(self) -> float:
-        return self._total_usd
-
     def summary(self) -> dict:
         with self._lock:
             return {
-                "total_usd": round(self._total_usd, 4),
-                "today_usd": round(self._today_cost(), 4),
+                "session_usd": round(self._session_usd, 4),
+                "today_usd": round(self.today_usd, 4),
+                "total_usd": round(self._session_usd, 4),  # compat
                 "budget_daily_usd": self._budget.daily_limit_usd,
                 "budget_total_usd": self._budget.total_limit_usd,
                 "by_model": {k: round(v, 4) for k, v in self._by_model.items()},
@@ -163,7 +271,7 @@ class CostTracker:
     def reset(self) -> None:
         with self._lock:
             self._records.clear()
-            self._total_usd = 0.0
+            self._session_usd = 0.0
             self._by_model.clear()
             self._by_task.clear()
 

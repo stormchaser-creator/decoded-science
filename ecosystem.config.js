@@ -59,7 +59,7 @@ module.exports = {
       name: 'decoded-extract',
       cwd: '/Users/whit/Projects/Decoded',
       script: '/Users/whit/Projects/Decoded/.venv/bin/python',
-      args: '-m decoded.extract.worker --limit 500 --concurrency 5',
+      args: '-m decoded.extract.worker --limit 200 --concurrency 3 --daily-budget 5 --total-budget 5',
       interpreter: 'none',
       env: {
         PYTHONPATH: '/Users/whit/Projects/Decoded',
@@ -69,15 +69,11 @@ module.exports = {
         NEO4J_PASSWORD: _env.NEO4J_PASSWORD || '',
         REDIS_URL: 'redis://localhost:6379/0',
         ANTHROPIC_API_KEY: _env.ANTHROPIC_API_KEY || '',
-        // Backoff: worker sleeps this many seconds before exit when queue is empty
         DECODE_EMPTY_BACKOFF: '120',
         DECODE_ERROR_BACKOFF: '60',
       },
-      autorestart: true,
-      max_restarts: 200,      // allow more restarts since each is intentional (queue drain)
-      restart_delay: 5000,    // PM2 delay between restarts (worker handles its own backoff)
-      min_uptime: '30s',
-      exp_backoff_restart_delay: 100,  // PM2 exponential backoff on crash (ms, doubles each time)
+      autorestart: false,     // DO NOT auto-restart — run manually or via cron
+      max_restarts: 0,
       watch: false,
       max_memory_restart: '512M',
       log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
@@ -116,7 +112,7 @@ module.exports = {
       name: 'decoded-connect',
       cwd: '/Users/whit/Projects/Decoded',
       script: '/Users/whit/Projects/Decoded/.venv/bin/python',
-      args: '-m decoded.connect.worker --limit 500',
+      args: '-m decoded.connect.worker --limit 200 --daily-budget 3 --total-budget 3',
       interpreter: 'none',
       env: {
         PYTHONPATH: '/Users/whit/Projects/Decoded',
@@ -127,9 +123,8 @@ module.exports = {
         REDIS_URL: 'redis://localhost:6379/0',
         ANTHROPIC_API_KEY: _env.ANTHROPIC_API_KEY || '',
       },
-      autorestart: true,
-      max_restarts: 20,
-      restart_delay: 60000,
+      autorestart: false,
+      max_restarts: 0,
       min_uptime: '10s',
       watch: false,
       max_memory_restart: '512M',
@@ -142,7 +137,7 @@ module.exports = {
       name: 'decoded-critique',
       cwd: '/Users/whit/Projects/Decoded',
       script: '/Users/whit/Projects/Decoded/.venv/bin/python',
-      args: '-m decoded.critique.worker --limit 100',
+      args: '-m decoded.critique.worker --limit 50 --daily-budget 2 --total-budget 2',
       interpreter: 'none',
       env: {
         PYTHONPATH: '/Users/whit/Projects/Decoded',
@@ -151,10 +146,10 @@ module.exports = {
         NEO4J_USER: 'neo4j',
         NEO4J_PASSWORD: _env.NEO4J_PASSWORD || '',
         ANTHROPIC_API_KEY: _env.ANTHROPIC_API_KEY || '',
+        REDIS_URL: 'redis://localhost:6379/0',
       },
-      autorestart: true,
-      max_restarts: 30,
-      restart_delay: 120000,
+      autorestart: false,
+      max_restarts: 0,
       min_uptime: '10s',
       watch: false,
       max_memory_restart: '512M',
