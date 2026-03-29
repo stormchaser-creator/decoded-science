@@ -26,7 +26,7 @@ export default function PapersPage() {
         setTotal(data.count || 0)
         setIsSearch(true)
       } else {
-        data = await fetch(`${API}/papers?limit=${PAGE_SIZE}&skip=${offset}&status=extracted`).then(r => r.json())
+        data = await fetch(`${API}/papers?limit=${PAGE_SIZE}&offset=${offset}&status=extracted`).then(r => r.json())
         setPapers(data.papers || [])
         setTotal(data.total || 0)
         setIsSearch(false)

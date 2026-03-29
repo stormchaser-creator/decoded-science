@@ -158,21 +158,29 @@ class CritiqueGenerator:
         """Parse JSON response from the LLM."""
         text = text.strip()
         # Strip markdown code fences if present
-        if text.startswith("```"):
-            lines = text.split("\n")
-            text = "\n".join(lines[1:-1])
+        lines = text.split("\n")
+        text = "\n".join(
+            line for line in lines if not line.strip().startswith("```")
+        ).strip()
 
         try:
             return json.loads(text)
         except json.JSONDecodeError:
-            # Extract JSON object
-            match = re.search(r'\{.*\}', text, re.DOTALL)
-            if match:
-                try:
-                    return json.loads(match.group(0))
-                except json.JSONDecodeError:
-                    pass
-            logger.warning("Could not parse critique JSON response")
+            # Find balanced JSON object using brace counting
+            start = text.find("{")
+            if start != -1:
+                depth = 0
+                for i, ch in enumerate(text[start:], start):
+                    if ch == "{":
+                        depth += 1
+                    elif ch == "}":
+                        depth -= 1
+                        if depth == 0:
+                            try:
+                                return json.loads(text[start:i + 1])
+                            except json.JSONDecodeError:
+                                break
+            logger.warning("Could not parse critique JSON response — using defaults")
             return {
                 "overall_quality": "medium",
                 "methodology_score": 5.0,

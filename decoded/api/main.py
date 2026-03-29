@@ -42,6 +42,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+import redis
 import psycopg2
 import psycopg2.extras
 from dotenv import load_dotenv
@@ -64,23 +65,69 @@ app = FastAPI(
     version="0.1.0",
 )
 
+_cors_origins = os.environ.get(
+    "CORS_ORIGINS",
+    "http://localhost:5173,https://connectome.theencodedhuman.com,https://thedecodedhuman.com",
+).split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=[o.strip() for o in _cors_origins],
+    allow_methods=["GET", "HEAD", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
+# Cache-Control header mapping (path prefix → max-age seconds)
+_CACHE_RULES = {
+    "/v1/stats": 60,
+    "/v1/graph/overview": 300,
+    "/papers": 30,
+    "/connections": 30,
+}
+
+
+@app.middleware("http")
+async def add_cache_headers(request, call_next):
+    response = await call_next(request)
+    if request.method == "GET":
+        for prefix, max_age in _CACHE_RULES.items():
+            if request.url.path.startswith(prefix):
+                response.headers["Cache-Control"] = f"public, max-age={max_age}"
+                break
+    return response
+
 
 # ---------------------------------------------------------------------------
-# DB connection pool (simple per-request)
+# DB connection pool
 # ---------------------------------------------------------------------------
+
+import psycopg2.pool
+
+_db_url = os.environ.get("DATABASE_URL", "postgresql://whit@localhost:5432/encoded_human")
+_db_pool = psycopg2.pool.ThreadedConnectionPool(minconn=2, maxconn=20, dsn=_db_url)
+
+_redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+try:
+    _redis = redis.from_url(_redis_url, decode_responses=True)
+    _redis.ping()
+except Exception:
+    _redis = None
+    logger.warning("Redis not available — caching disabled")
+
 
 def get_db():
-    db_url = os.environ.get("DATABASE_URL", "postgresql://whit@localhost:5432/encoded_human")
-    conn = psycopg2.connect(db_url)
+    conn = _db_pool.getconn()
     psycopg2.extras.register_uuid(conn)
     return conn
+
+
+def release_db(conn):
+    """Return connection to pool (call instead of release_db(conn))."""
+    if conn:
+        try:
+            conn.rollback()  # reset any uncommitted state
+        except Exception:
+            pass
+        _db_pool.putconn(conn)
 
 
 def _jsonify_row(row: dict) -> dict:
@@ -120,13 +167,13 @@ class BridgeRequest(BaseModel):
 
 # Auth models
 class RegisterRequest(BaseModel):
-    email: str
+    email: EmailStr
     name: str
-    password: str
+    password: str  # min length enforced in endpoint
 
 
 class LoginRequest(BaseModel):
-    email: str
+    email: EmailStr
     password: str
 
 
@@ -176,6 +223,20 @@ class ConnectomeQueryRequest(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Auth helpers (must be defined before endpoints that use Depends)
+# ---------------------------------------------------------------------------
+
+def get_current_user(authorization: Optional[str] = Header(None)) -> dict:
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
+    token = authorization.split(" ", 1)[1]
+    payload = decode_token(token)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    return payload
+
+
+# ---------------------------------------------------------------------------
 # Health
 # ---------------------------------------------------------------------------
 
@@ -185,7 +246,7 @@ def health():
         conn = get_db()
         cur = conn.cursor()
         cur.execute("SELECT 1")
-        conn.close()
+        release_db(conn)
         db_ok = True
     except Exception:
         db_ok = False
@@ -237,7 +298,7 @@ def stats():
     )
     critique_cost = float(cur.fetchone()["total"])
 
-    conn.close()
+    release_db(conn)
     return {
         "papers": {"total": total_papers, "by_status": paper_stats},
         "extractions": total_extractions,
@@ -302,7 +363,7 @@ def list_papers(
     cur.execute(f"SELECT count(*) as n FROM raw_papers p WHERE {where}", params)
     total = cur.fetchone()["n"]
 
-    conn.close()
+    release_db(conn)
     return {"papers": rows, "total": total, "limit": limit, "offset": offset}
 
 
@@ -325,7 +386,7 @@ def get_paper(paper_id: str):
         (paper_id,),
     )
     row = cur.fetchone()
-    conn.close()
+    release_db(conn)
     if not row:
         raise HTTPException(status_code=404, detail="Paper not found")
     return _jsonify_row(dict(row))
@@ -350,7 +411,7 @@ def get_paper_connections(paper_id: str):
         (paper_id, paper_id),
     )
     rows = [_jsonify_row(dict(r)) for r in cur.fetchall()]
-    conn.close()
+    release_db(conn)
     return {"paper_id": paper_id, "connections": rows, "count": len(rows)}
 
 
@@ -393,7 +454,7 @@ def list_critiques(
     count_query = f"SELECT COUNT(*) as n FROM paper_critiques pc WHERE 1=1 {quality_filter}"
     cur.execute(count_query)
     total = cur.fetchone()["n"]
-    conn.close()
+    release_db(conn)
     return {"critiques": rows, "total": total, "count": len(rows)}
 
 
@@ -417,7 +478,7 @@ def get_paper_entities(paper_id: str):
         (paper_id,),
     )
     row = cur.fetchone()
-    conn.close()
+    release_db(conn)
     if not row:
         raise HTTPException(status_code=404, detail="No extraction data for this paper")
     return _jsonify_row(dict(row))
@@ -432,7 +493,7 @@ def get_paper_critique(paper_id: str):
         (paper_id,),
     )
     row = cur.fetchone()
-    conn.close()
+    release_db(conn)
     if not row:
         raise HTTPException(status_code=404, detail="No critique found for this paper")
     return _jsonify_row(dict(row))
@@ -479,7 +540,7 @@ def list_connections(
     cur.execute(f"SELECT count(*) as n FROM discovered_connections dc WHERE {where}", params)
     total = cur.fetchone()["n"]
 
-    conn.close()
+    release_db(conn)
     return {"connections": rows, "total": total}
 
 
@@ -509,7 +570,7 @@ def get_convergences(
         (min_confidence, limit),
     )
     rows = [_jsonify_row(dict(r)) for r in cur.fetchall()]
-    conn.close()
+    release_db(conn)
     return {"convergences": rows, "count": len(rows)}
 
 
@@ -540,7 +601,7 @@ def get_gaps(limit: int = Query(20, le=100)):
         (limit,),
     )
     rows = [_jsonify_row(dict(r)) for r in cur.fetchall()]
-    conn.close()
+    release_db(conn)
     return {"gaps": rows, "count": len(rows)}
 
 
@@ -555,25 +616,26 @@ def search(
 ):
     conn = get_db()
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    search_term = f"%{q}%"
+    # Use full-text search with GIN index (much faster than ILIKE at scale)
+    tsquery = " & ".join(word for word in q.split() if word)
     cur.execute(
         """
         SELECT p.id, p.title, p.abstract, p.authors, p.journal,
                p.doi, p.published_date, p.status,
-               COUNT(DISTINCT dc.id) as connection_count
+               COUNT(DISTINCT dc.id) as connection_count,
+               ts_rank(p.search_vector, to_tsquery('english', %s)) as rank
         FROM raw_papers p
         LEFT JOIN discovered_connections dc ON dc.paper_a_id = p.id OR dc.paper_b_id = p.id
-        WHERE p.title ILIKE %s
-           OR p.abstract ILIKE %s
+        WHERE p.search_vector @@ to_tsquery('english', %s)
         GROUP BY p.id, p.title, p.abstract, p.authors, p.journal,
                  p.doi, p.published_date, p.status
-        ORDER BY connection_count DESC, p.published_date DESC NULLS LAST
+        ORDER BY rank DESC, connection_count DESC
         LIMIT %s
         """,
-        (search_term, search_term, limit),
+        (tsquery, tsquery, limit),
     )
     rows = [_jsonify_row(dict(r)) for r in cur.fetchall()]
-    conn.close()
+    release_db(conn)
     return {"query": q, "results": rows, "count": len(rows)}
 
 
@@ -581,14 +643,14 @@ def search(
 # On-demand analysis
 # ---------------------------------------------------------------------------
 
-@app.post("/analyze")
-async def analyze_doi(request: AnalyzeRequest, background_tasks: BackgroundTasks):
-    """Trigger on-demand analysis of a paper by DOI."""
+@app.post("/analyze", deprecated=True)
+async def analyze_doi(request: AnalyzeRequest, background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user)):
+    """Deprecated: use POST /v1/papers/analyze instead. Triggers on-demand analysis of a paper by DOI."""
     background_tasks.add_task(_run_doi_analysis, request.doi, request.priority)
     return {
         "status": "queued",
         "doi": request.doi,
-        "message": "Analysis started in background. Check /papers or /search for results.",
+        "message": "Deprecated — use POST /v1/papers/analyze for job tracking. Analysis started in background.",
     }
 
 
@@ -607,8 +669,8 @@ def _run_doi_analysis(doi: str, priority: int = 0) -> None:
 # ---------------------------------------------------------------------------
 
 @app.post("/bridge")
-def bridge_query(request: BridgeRequest):
-    """On-demand bridge query: find/build connection between two concepts."""
+def bridge_query(request: BridgeRequest, current_user: dict = Depends(get_current_user)):
+    """On-demand bridge query: find/build connection between two concepts (requires auth)."""
     import json as _json
     from decoded.connect.worker import BridgeQueryWorker
     worker = BridgeQueryWorker()
@@ -647,9 +709,9 @@ def bridge_query(request: BridgeRequest):
              hypothesis_text, cost),
         )
         conn.commit()
-        conn.close()
-    except Exception:
-        pass
+        release_db(conn)
+    except Exception as exc:
+        logger.warning("Bridge cache write failed: %s", exc)
 
     return {
         "concept_a": result["concept_a"],
@@ -701,22 +763,13 @@ def connectome_pearl_stats():
     rows = [dict(r) for r in cur.fetchall()]
     cur.execute("SELECT count(*) as n FROM kb_entries WHERE workstation = 'decoded_connectome'")
     total = cur.fetchone()["n"]
-    conn.close()
+    release_db(conn)
     return {"total_entries": total, "breakdown": rows}
 
 
 # ---------------------------------------------------------------------------
-# Auth helpers
+# Auth endpoints
 # ---------------------------------------------------------------------------
-
-def get_current_user(authorization: Optional[str] = Header(None)) -> dict:
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
-    token = authorization.split(" ", 1)[1]
-    payload = decode_token(token)
-    if not payload:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-    return payload
 
 
 # ---------------------------------------------------------------------------
@@ -725,11 +778,13 @@ def get_current_user(authorization: Optional[str] = Header(None)) -> dict:
 
 @app.post("/auth/register", status_code=201)
 def register(request: RegisterRequest):
+    if len(request.password) < 8:
+        raise HTTPException(status_code=422, detail="Password must be at least 8 characters")
     conn = get_db()
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     cur.execute("SELECT id FROM decoded_users WHERE email = %s", (request.email,))
     if cur.fetchone():
-        conn.close()
+        release_db(conn)
         raise HTTPException(status_code=409, detail="Email already registered")
     pw_hash = hash_password(request.password)
     cur.execute(
@@ -738,7 +793,7 @@ def register(request: RegisterRequest):
     )
     user = dict(cur.fetchone())
     conn.commit()
-    conn.close()
+    release_db(conn)
     user["created_at"] = user["created_at"].isoformat() if user.get("created_at") else None
     token = create_access_token(str(user["id"]), user["email"])
     return {"user": user, "token": token}
@@ -750,7 +805,7 @@ def login(request: LoginRequest):
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     cur.execute("SELECT id, email, name, role, password_hash FROM decoded_users WHERE email = %s", (request.email,))
     row = cur.fetchone()
-    conn.close()
+    release_db(conn)
     if not row or not verify_password(request.password, row["password_hash"]):
         raise HTTPException(status_code=401, detail="Invalid credentials")
     user = {k: v for k, v in row.items() if k != "password_hash"}
@@ -767,7 +822,7 @@ def profile(current_user: dict = Depends(get_current_user)):
         (current_user["sub"],),
     )
     row = cur.fetchone()
-    conn.close()
+    release_db(conn)
     if not row:
         raise HTTPException(status_code=404, detail="User not found")
     user = dict(row)
@@ -788,7 +843,7 @@ def list_searches(current_user: dict = Depends(get_current_user)):
         (current_user["sub"],),
     )
     rows = [_jsonify_row(dict(r)) for r in cur.fetchall()]
-    conn.close()
+    release_db(conn)
     return {"searches": rows}
 
 
@@ -802,7 +857,7 @@ def create_search(request: SavedSearchCreate, current_user: dict = Depends(get_c
     )
     row = _jsonify_row(dict(cur.fetchone()))
     conn.commit()
-    conn.close()
+    release_db(conn)
     return row
 
 
@@ -815,7 +870,7 @@ def delete_search(search_id: str, current_user: dict = Depends(get_current_user)
         (search_id, current_user["sub"]),
     )
     conn.commit()
-    conn.close()
+    release_db(conn)
 
 
 # ---------------------------------------------------------------------------
@@ -839,7 +894,7 @@ def list_collections(current_user: dict = Depends(get_current_user)):
         (current_user["sub"],),
     )
     rows = [_jsonify_row(dict(r)) for r in cur.fetchall()]
-    conn.close()
+    release_db(conn)
     return {"collections": rows}
 
 
@@ -853,7 +908,7 @@ def create_collection(request: CollectionCreate, current_user: dict = Depends(ge
     )
     row = _jsonify_row(dict(cur.fetchone()))
     conn.commit()
-    conn.close()
+    release_db(conn)
     return row
 
 
@@ -868,14 +923,14 @@ def add_paper_to_collection(
     # Verify collection ownership
     cur.execute("SELECT id FROM decoded_collections WHERE id = %s AND user_id = %s", (collection_id, current_user["sub"]))
     if not cur.fetchone():
-        conn.close()
+        release_db(conn)
         raise HTTPException(status_code=404, detail="Collection not found")
     cur.execute(
         "INSERT INTO collection_papers (collection_id, paper_id, notes) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
         (collection_id, request.paper_id, request.notes),
     )
     conn.commit()
-    conn.close()
+    release_db(conn)
     return {"status": "added"}
 
 
@@ -887,12 +942,20 @@ def remove_paper_from_collection(
 ):
     conn = get_db()
     cur = conn.cursor()
+    # Verify ownership before deleting
+    cur.execute(
+        "SELECT id FROM decoded_collections WHERE id = %s AND user_id = %s",
+        (collection_id, current_user["sub"]),
+    )
+    if not cur.fetchone():
+        release_db(conn)
+        raise HTTPException(status_code=404, detail="Collection not found")
     cur.execute(
         "DELETE FROM collection_papers WHERE collection_id = %s AND paper_id = %s",
         (collection_id, paper_id),
     )
     conn.commit()
-    conn.close()
+    release_db(conn)
 
 
 @app.get("/workspace/collections/{collection_id}/export")
@@ -917,7 +980,7 @@ def export_collection(
         (collection_id, current_user["sub"]),
     )
     papers = [_jsonify_row(dict(r)) for r in cur.fetchall()]
-    conn.close()
+    release_db(conn)
 
     if format == "bibtex":
         lines = []
@@ -986,7 +1049,7 @@ def list_watchlists(current_user: dict = Depends(get_current_user)):
         (current_user["sub"],),
     )
     rows = [_jsonify_row(dict(r)) for r in cur.fetchall()]
-    conn.close()
+    release_db(conn)
     return {"watchlists": rows}
 
 
@@ -1002,7 +1065,7 @@ def create_watchlist(request: WatchlistCreate, current_user: dict = Depends(get_
     )
     row = _jsonify_row(dict(cur.fetchone()))
     conn.commit()
-    conn.close()
+    release_db(conn)
     return row
 
 
@@ -1012,7 +1075,7 @@ def delete_watchlist(watchlist_id: str, current_user: dict = Depends(get_current
     cur = conn.cursor()
     cur.execute("DELETE FROM watchlists WHERE id = %s AND user_id = %s", (watchlist_id, current_user["sub"]))
     conn.commit()
-    conn.close()
+    release_db(conn)
 
 
 # ---------------------------------------------------------------------------
@@ -1028,7 +1091,7 @@ def list_workspaces(current_user: dict = Depends(get_current_user)):
         (current_user["sub"],),
     )
     rows = [_jsonify_row(dict(r)) for r in cur.fetchall()]
-    conn.close()
+    release_db(conn)
     return {"workspaces": rows}
 
 
@@ -1045,7 +1108,7 @@ def create_workspace(request: WorkspaceCreate, current_user: dict = Depends(get_
     )
     row = _jsonify_row(dict(cur.fetchone()))
     conn.commit()
-    conn.close()
+    release_db(conn)
     return row
 
 
@@ -1060,7 +1123,7 @@ def update_workspace(
     # Verify ownership
     cur.execute("SELECT id FROM decoded_workspaces WHERE id = %s AND user_id = %s", (workspace_id, current_user["sub"]))
     if not cur.fetchone():
-        conn.close()
+        release_db(conn)
         raise HTTPException(status_code=404, detail="Workspace not found")
     updates = {}
     if request.name is not None:
@@ -1070,7 +1133,7 @@ def update_workspace(
     if request.state is not None:
         updates["state"] = json.dumps(request.state)
     if not updates:
-        conn.close()
+        release_db(conn)
         return {"status": "no changes"}
     set_clause = ", ".join(f"{k} = %s" for k in updates)
     values = list(updates.values()) + [workspace_id]
@@ -1080,7 +1143,7 @@ def update_workspace(
     )
     row = _jsonify_row(dict(cur.fetchone()))
     conn.commit()
-    conn.close()
+    release_db(conn)
     return row
 
 
@@ -1091,6 +1154,12 @@ def update_workspace(
 @app.get("/v1/stats")
 def stats_v1():
     """Comprehensive stats including entities, claims, graph nodes, relationships."""
+    # Check Redis cache first (60s TTL)
+    if _redis:
+        cached = _redis.get("decoded:stats_v1")
+        if cached:
+            return json.loads(cached)
+
     conn = get_db()
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
@@ -1142,7 +1211,7 @@ def stats_v1():
         from neo4j import GraphDatabase
         neo4j_uri = os.environ.get("NEO4J_URI", "bolt://localhost:7687")
         neo4j_user = os.environ.get("NEO4J_USER", "neo4j")
-        neo4j_pw = os.environ.get("NEO4J_PASSWORD", "decoded123")
+        neo4j_pw = os.environ.get("NEO4J_PASSWORD", "")
         driver = GraphDatabase.driver(neo4j_uri, auth=(neo4j_user, neo4j_pw))
         with driver.session() as s:
             graph_nodes = s.run("MATCH (n) RETURN count(n) as c").single()["c"]
@@ -1151,8 +1220,8 @@ def stats_v1():
     except Exception:
         pass
 
-    conn.close()
-    return {
+    release_db(conn)
+    result = {
         "papers": {"total": total_papers, "by_status": paper_stats},
         "extractions": total_extractions,
         "connections": {"total": total_connections, "by_type": connection_types},
@@ -1164,6 +1233,13 @@ def stats_v1():
         "field_gaps": field_gaps_count,
         "graph": {"nodes": graph_nodes, "relationships": graph_relationships},
     }
+    # Cache for 60 seconds
+    if _redis:
+        try:
+            _redis.setex("decoded:stats_v1", 60, json.dumps(result))
+        except Exception:
+            pass
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -1212,7 +1288,7 @@ def graph_overview(limit: int = Query(200, le=500)):
     else:
         connections = []
 
-    conn.close()
+    release_db(conn)
 
     nodes = [
         {
@@ -1291,7 +1367,7 @@ def graph_neighborhood(paper_id: str, hops: int = Query(2, le=3)):
         )
         hop2_connections = [dict(r) for r in cur.fetchall()]
 
-    conn.close()
+    release_db(conn)
 
     all_connections = direct + hop2_connections
     node_map = {}
@@ -1359,7 +1435,7 @@ def graph_cluster(discipline: str):
             for r in cur.fetchall()
         ]
 
-    conn.close()
+    release_db(conn)
     nodes = [
         {"id": str(p["id"]), "title": p["title"], "journal": p["journal"],
          "source": p["source"], "val": min(int(p["connection_count"] or 1), 20)}
@@ -1372,13 +1448,25 @@ def graph_cluster(discipline: str):
 # v1/papers/analyze — on-demand DOI analysis with job tracking (Step 9)
 # ---------------------------------------------------------------------------
 
-import threading
 import uuid as _uuid
 import time as _time
 
-# In-memory job store (sufficient for single-process; use Redis for multi-worker prod)
-_analyze_jobs: dict = {}
-_jobs_lock = threading.Lock()
+_ANALYZE_JOB_PREFIX = "decoded:analyze_job:"
+
+
+def _set_analyze_job(job_id: str, data: dict):
+    """Store analyze job in Redis with 24h TTL."""
+    if _redis:
+        _redis.setex(f"{_ANALYZE_JOB_PREFIX}{job_id}", 86400, json.dumps(data))
+
+
+def _get_analyze_job(job_id: str) -> dict | None:
+    """Retrieve analyze job from Redis."""
+    if _redis:
+        raw = _redis.get(f"{_ANALYZE_JOB_PREFIX}{job_id}")
+        if raw:
+            return json.loads(raw)
+    return None
 
 
 class AnalyzeJobRequest(BaseModel):
@@ -1390,16 +1478,15 @@ class AnalyzeJobRequest(BaseModel):
 async def analyze_doi_v1(request: AnalyzeJobRequest, background_tasks: BackgroundTasks):
     """Queue DOI analysis and return a job_id for polling."""
     job_id = str(_uuid.uuid4())
-    with _jobs_lock:
-        _analyze_jobs[job_id] = {
-            "job_id": job_id,
-            "doi": request.doi,
-            "status": "queued",
-            "stage": None,
-            "paper_id": None,
-            "error": None,
-            "created_at": _time.time(),
-        }
+    _set_analyze_job(job_id, {
+        "job_id": job_id,
+        "doi": request.doi,
+        "status": "queued",
+        "stage": None,
+        "paper_id": None,
+        "error": None,
+        "created_at": _time.time(),
+    })
     background_tasks.add_task(_run_doi_analysis_tracked, job_id, request.doi, request.priority)
     return {"job_id": job_id, "doi": request.doi, "status": "queued"}
 
@@ -1407,8 +1494,7 @@ async def analyze_doi_v1(request: AnalyzeJobRequest, background_tasks: Backgroun
 @app.get("/v1/papers/analyze/{job_id}")
 def get_analyze_job(job_id: str):
     """Poll status of a DOI analysis job."""
-    with _jobs_lock:
-        job = _analyze_jobs.get(job_id)
+    job = _get_analyze_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     return job
@@ -1417,13 +1503,14 @@ def get_analyze_job(job_id: str):
 def _run_doi_analysis_tracked(job_id: str, doi: str, priority: int = 1) -> None:
     """Background task with stage tracking."""
     def _update(stage: str, status: str = "running", paper_id=None, error=None):
-        with _jobs_lock:
-            if job_id in _analyze_jobs:
-                _analyze_jobs[job_id].update({"stage": stage, "status": status})
-                if paper_id:
-                    _analyze_jobs[job_id]["paper_id"] = paper_id
-                if error:
-                    _analyze_jobs[job_id]["error"] = error
+        data = _get_analyze_job(job_id)
+        if data:
+            data.update({"stage": stage, "status": status})
+            if paper_id:
+                data["paper_id"] = paper_id
+            if error:
+                data["error"] = error
+            _set_analyze_job(job_id, data)
 
     try:
         _update("fetching")
@@ -1435,7 +1522,7 @@ def _run_doi_analysis_tracked(job_id: str, doi: str, priority: int = 1) -> None:
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cur.execute("SELECT id, status FROM raw_papers WHERE doi = %s LIMIT 1", (doi,))
         existing = cur.fetchone()
-        conn.close()
+        release_db(conn)
 
         if existing:
             paper_id = str(existing["id"])
@@ -1445,7 +1532,13 @@ def _run_doi_analysis_tracked(job_id: str, doi: str, priority: int = 1) -> None:
 
         _update("extracting")
         result = worker.analyze_doi(doi, priority=priority)
-        paper_id = result.get("paper_id") if result else None
+        if not result:
+            _update("error", status="failed", error="Analysis returned no result")
+            return
+        if result.get("status") == "error":
+            _update("error", status="failed", error=result.get("message", "Unknown error"))
+            return
+        paper_id = result.get("paper_id")
         _update("done", status="complete", paper_id=paper_id)
     except Exception as exc:
         logger.error("Tracked DOI analysis failed for %s: %s", doi, exc, exc_info=True)
@@ -1527,7 +1620,7 @@ def get_convergences_v1(
                 elif isinstance(kf, str) and kf:
                     row["convergent_claim"] = kf[:200]
 
-    conn.close()
+    release_db(conn)
     return {"convergences": rows, "count": len(rows)}
 
 
@@ -1561,7 +1654,7 @@ def get_missed_citations(paper_id: str):
     connected = {str(r["other_id"]): dict(r) for r in cur.fetchall()}
 
     if not connected:
-        conn.close()
+        release_db(conn)
         return {"missed_citations": []}
 
     # Get reference DOIs for the source paper
@@ -1615,7 +1708,7 @@ def get_missed_citations(paper_id: str):
         })
 
     missed.sort(key=lambda x: (-(x["novelty_score"] or 0), -(x["confidence"] or 0)))
-    conn.close()
+    release_db(conn)
     return {"missed_citations": missed[:20], "total": len(missed)}
 
 
@@ -1655,7 +1748,7 @@ def get_structured_gaps(
         params,
     )
     rows = [_jsonify_row(dict(r)) for r in cur.fetchall()]
-    conn.close()
+    release_db(conn)
     return {"gaps": rows, "count": len(rows)}
 
 
@@ -1680,7 +1773,7 @@ def get_cached_bridge(concept_a: str, concept_b: str):
             (str(row["id"]),),
         )
         conn.commit()
-    conn.close()
+    release_db(conn)
     if not row:
         raise HTTPException(status_code=404, detail="No cached bridge result")
     return _jsonify_row(dict(row))

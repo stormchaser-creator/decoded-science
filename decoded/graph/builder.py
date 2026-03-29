@@ -10,15 +10,16 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 from typing import Any
 
 from neo4j import GraphDatabase, Driver
 
 logger = logging.getLogger(__name__)
 
-NEO4J_URI = "bolt://localhost:7687"
-NEO4J_USER = "neo4j"
-NEO4J_PASSWORD = "decoded123"
+NEO4J_URI = os.environ.get("NEO4J_URI", "bolt://localhost:7687")
+NEO4J_USER = os.environ.get("NEO4J_USER", "neo4j")
+NEO4J_PASSWORD = os.environ.get("NEO4J_PASSWORD", "")
 
 
 def _short_id(text: str) -> str:
@@ -394,30 +395,28 @@ class GraphBuilder:
         max_hops: int = 4,
     ) -> list[dict]:
         """Find shortest paths between two concepts/papers in the graph."""
-        with self._driver.session() as s:
-            result = s.run(
-                """
+        # Neo4j requires literal integers in variable-length path patterns
+        safe_hops = max(1, min(int(max_hops), 10))
+        query = f"""
                 MATCH path = shortestPath(
-                    (a)-[*1..$hops]-(b)
+                    (a)-[*1..{safe_hops}]-(b)
                 )
                 WHERE (a:Paper OR a:Entity OR a:Concept)
                   AND (b:Paper OR b:Entity OR b:Concept)
                   AND (a.title CONTAINS $ca OR a.text CONTAINS $ca OR a.name CONTAINS $ca)
                   AND (b.title CONTAINS $cb OR b.text CONTAINS $cb OR b.name CONTAINS $cb)
-                RETURN [n in nodes(path) | {
+                RETURN [n in nodes(path) | {{
                     labels: labels(n),
                     id: n.id,
                     title: n.title,
                     text: n.text,
                     name: n.name
-                }] as nodes,
+                }}] as nodes,
                 [r in relationships(path) | type(r)] as rel_types,
                 length(path) as hops
                 ORDER BY hops
                 LIMIT 5
-                """,
-                ca=concept_a,
-                cb=concept_b,
-                hops=max_hops,
-            )
+                """
+        with self._driver.session() as s:
+            result = s.run(query, ca=concept_a, cb=concept_b)
             return [dict(r) for r in result]

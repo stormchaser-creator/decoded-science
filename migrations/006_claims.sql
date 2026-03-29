@@ -3,7 +3,7 @@
 -- Run: psql -U whit -d encoded_human -f migrations/006_claims.sql
 
 CREATE TABLE IF NOT EXISTS claims (
-    id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     paper_id            UUID REFERENCES raw_papers(id) ON DELETE CASCADE,
     text                TEXT NOT NULL,
     claim_type          VARCHAR(30),        -- finding, hypothesis, conclusion, negative_result, methodological

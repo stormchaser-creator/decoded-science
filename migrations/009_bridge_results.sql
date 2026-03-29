@@ -2,7 +2,7 @@
 -- Caches bridge query results so repeated queries are instant
 
 CREATE TABLE IF NOT EXISTS bridge_results (
-    id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     concept_a           VARCHAR(255) NOT NULL,
     concept_b           VARCHAR(255) NOT NULL,
     path_found          BOOLEAN NOT NULL DEFAULT FALSE,

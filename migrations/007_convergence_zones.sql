@@ -3,7 +3,7 @@
 -- Populated by the compute_convergence_zones job
 
 CREATE TABLE IF NOT EXISTS convergence_zones (
-    id                      UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     anchor_paper_id         UUID REFERENCES raw_papers(id) ON DELETE CASCADE,
     convergent_claim        TEXT,
     disciplines             JSONB DEFAULT '[]',

@@ -244,22 +244,17 @@ export default function PaperDetailPage() {
                     <span style={{
                       ...s.tag,
                       marginTop: 0,
-                      ...(parseFloat(critique.overall_quality) >= 7 ? s.tagGreen : parseFloat(critique.overall_quality) >= 5 ? s.tagYellow : s.tagRed),
+                      ...(critique.overall_quality === 'high' ? s.tagGreen : critique.overall_quality === 'medium' ? s.tagYellow : s.tagRed),
                       fontWeight: '700',
                     }}>
-                      {parseFloat(critique.overall_quality) >= 7 ? 'HIGH' : parseFloat(critique.overall_quality) >= 5 ? 'MED' : 'LOW'}
+                      {critique.overall_quality === 'high' ? 'HIGH' : critique.overall_quality === 'medium' ? 'MED' : 'LOW'}
                     </span>
                   )}
                 </div>
               </div>
-              {critique.connections_summary && (
-                <p style={{ fontSize: '13px', color: '#a0a0b8', lineHeight: '1.6', margin: '0 0 8px' }}>
-                  {critique.connections_summary}
-                </p>
-              )}
-              {critique.brief && (
+              {(critique.summary || critique.brief) && (
                 <p style={{ fontSize: '13px', color: '#a0a0b8', lineHeight: '1.7', whiteSpace: 'pre-wrap', margin: 0 }}>
-                  {critique.brief}
+                  {critique.summary || critique.brief}
                 </p>
               )}
             </div>

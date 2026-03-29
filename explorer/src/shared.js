@@ -36,11 +36,11 @@ export function epistemicColor(evidenceStrength) {
 export function connectionEpistemicColor(connectionType) {
   if (!connectionType) return EPISTEMIC.speculation
   const t = connectionType.toLowerCase()
-  if (t === 'contradicts') return EPISTEMIC.contradiction
-  if (t === 'extends') return EPISTEMIC.fact
-  if (t === 'mechanism_for') return EPISTEMIC.interpretation
-  if (t === 'shares_target') return EPISTEMIC.hypothesis
-  if (t === 'convergent_evidence') return EPISTEMIC.convergence
+  if (t === 'contradicts') return EPISTEMIC.contradiction       // red
+  if (t === 'extends') return EPISTEMIC.convergence             // green (matches TYPE_COLORS)
+  if (t === 'mechanism_for') return EPISTEMIC.fact              // blue
+  if (t === 'shares_target') return EPISTEMIC.interpretation    // purple
+  if (t === 'convergent_evidence') return EPISTEMIC.hypothesis  // amber
   if (t === 'methodological_parallel') return EPISTEMIC.speculation
   return EPISTEMIC.speculation
 }

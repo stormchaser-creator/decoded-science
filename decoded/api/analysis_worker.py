@@ -63,6 +63,29 @@ class AnalysisWorker:
         # Extract if not already done
         cur.execute("SELECT id FROM extraction_results WHERE paper_id = %s", (paper_id,))
         if not cur.fetchone():
+            # Check if there is any content to extract
+            cur.execute(
+                "SELECT abstract, full_text, sections FROM raw_papers WHERE id = %s",
+                (paper_id,),
+            )
+            content_row = cur.fetchone()
+            has_content = bool(
+                content_row and (
+                    content_row["abstract"] or
+                    content_row["full_text"] or
+                    (content_row["sections"] and content_row["sections"] != {})
+                )
+            )
+            if not has_content:
+                return {
+                    "doi": doi,
+                    "paper_id": paper_id,
+                    "status": "error",
+                    "message": "No abstract or full text available for this paper. "
+                               "CrossRef, Semantic Scholar, and PubMed all lack content. "
+                               "The paper may require manual content entry or is behind a paywall.",
+                    "steps": [],
+                }
             try:
                 self._extract(conn, paper_id)
                 result["steps"].append("extracted")
@@ -89,68 +112,144 @@ class AnalysisWorker:
         return result
 
     def _fetch_and_store(self, conn, doi: str) -> str | None:
-        """Fetch paper metadata from PubMed via DOI and store it."""
+        """Fetch paper metadata from CrossRef + Semantic Scholar fallback and store it."""
         import httpx
         import json
+        import re
         from uuid import uuid4
+        from datetime import date as _date
 
-        # Try CrossRef for metadata
+        title = "Unknown"
+        authors: list[str] = []
+        abstract = ""
+        journal = None
+        pub_date = None
+
+        # ── Step 1: CrossRef ────────────────────────────────────────────────
         try:
-            url = f"https://api.crossref.org/works/{doi}"
-            resp = httpx.get(url, timeout=15, headers={"User-Agent": "Decoded/0.1 mailto:research@decoded.ai"})
+            resp = httpx.get(
+                f"https://api.crossref.org/works/{doi}",
+                timeout=15,
+                headers={"User-Agent": "Decoded/0.1 mailto:research@decoded.ai"},
+            )
             if resp.status_code == 200:
                 data = resp.json()["message"]
                 title_parts = data.get("title", [])
                 title = title_parts[0] if title_parts else "Unknown"
-                authors = []
                 for a in data.get("author", []):
                     name = f"{a.get('given', '')} {a.get('family', '')}".strip()
                     if name:
                         authors.append(name)
-                abstract = ""
                 if "abstract" in data:
-                    import re
                     abstract = re.sub(r"<[^>]+>", "", data["abstract"]).strip()
                 journal_items = data.get("container-title", [])
                 journal = journal_items[0] if journal_items else None
-                pub_date = None
                 if "published" in data:
                     parts = data["published"].get("date-parts", [[]])[0]
                     if parts:
-                        from datetime import date
-                        pub_date = date(parts[0], parts[1] if len(parts) > 1 else 1, parts[2] if len(parts) > 2 else 1)
-
-                paper_id = str(uuid4())
-                cur = conn.cursor()
-                cur.execute(
-                    """
-                    INSERT INTO raw_papers
-                        (id, source, external_id, title, abstract, authors, journal,
-                         doi, published_date, status, raw_metadata, created_at, updated_at)
-                    VALUES (%s, 'crossref', %s, %s, %s, %s, %s, %s, %s, 'fetched', %s, NOW(), NOW())
-                    ON CONFLICT (source, external_id) DO UPDATE SET
-                        title = EXCLUDED.title,
-                        updated_at = NOW()
-                    RETURNING id
-                    """,
-                    (
-                        paper_id,
-                        doi,
-                        title,
-                        abstract,
-                        json.dumps(authors),
-                        journal,
-                        doi,
-                        pub_date,
-                        json.dumps({"crossref": True}),
-                    ),
-                )
-                result = cur.fetchone()
-                conn.commit()
-                logger.info("Fetched DOI %s from CrossRef: %s", doi, title[:60])
-                return str(result[0]) if result else paper_id
+                        pub_date = _date(parts[0], parts[1] if len(parts) > 1 else 1, parts[2] if len(parts) > 2 else 1)
+                logger.info("CrossRef OK for %s: title=%s abstract=%s", doi, bool(title), bool(abstract))
         except Exception as exc:
             logger.warning("CrossRef fetch failed for %s: %s", doi, exc)
+
+        # ── Step 2: Semantic Scholar fallback for abstract ──────────────────
+        if not abstract:
+            try:
+                s2_url = f"https://api.semanticscholar.org/graph/v1/paper/DOI:{doi}"
+                resp2 = httpx.get(
+                    s2_url,
+                    params={"fields": "abstract,title,authors,year,venue,externalIds"},
+                    timeout=15,
+                    headers={"User-Agent": "Decoded/0.1 mailto:research@decoded.ai"},
+                )
+                if resp2.status_code == 200:
+                    s2 = resp2.json()
+                    if s2.get("abstract"):
+                        abstract = s2["abstract"].strip()
+                        logger.info("Semantic Scholar provided abstract for %s", doi)
+                    if title == "Unknown" and s2.get("title"):
+                        title = s2["title"]
+                    if not authors:
+                        authors = [a.get("name", "") for a in s2.get("authors", [])[:10] if a.get("name")]
+                    if not journal and s2.get("venue"):
+                        journal = s2["venue"]
+                    if not pub_date and s2.get("year"):
+                        try:
+                            pub_date = _date(int(s2["year"]), 1, 1)
+                        except (ValueError, TypeError):
+                            pass
+                    # PMC ID for potential full-text retrieval
+                    ext_ids = s2.get("externalIds", {})
+                    pmc_id = ext_ids.get("PubMedCentral")
+                    if pmc_id:
+                        logger.info("Semantic Scholar found PMC ID %s for %s", pmc_id, doi)
+            except Exception as exc:
+                logger.warning("Semantic Scholar fetch failed for %s: %s", doi, exc)
+
+        # ── Step 3: PubMed efetch fallback ──────────────────────────────────
+        if not abstract:
+            try:
+                # Search PubMed by DOI
+                search_resp = httpx.get(
+                    "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi",
+                    params={"db": "pubmed", "term": f"{doi}[doi]", "retmode": "json"},
+                    timeout=15,
+                )
+                if search_resp.status_code == 200:
+                    pmids = search_resp.json().get("esearchresult", {}).get("idlist", [])
+                    if pmids:
+                        fetch_resp = httpx.get(
+                            "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi",
+                            params={"db": "pubmed", "id": pmids[0], "retmode": "xml", "rettype": "abstract"},
+                            timeout=15,
+                        )
+                        if fetch_resp.status_code == 200:
+                            from xml.etree import ElementTree as ET
+                            root = ET.fromstring(fetch_resp.text)
+                            ab_el = root.find(".//AbstractText")
+                            if ab_el is not None and ab_el.text:
+                                abstract = ab_el.text.strip()
+                                logger.info("PubMed provided abstract for %s (PMID %s)", doi, pmids[0])
+            except Exception as exc:
+                logger.warning("PubMed fallback failed for %s: %s", doi, exc)
+
+        if not abstract:
+            logger.warning("No abstract found for DOI %s after CrossRef + S2 + PubMed", doi)
+
+        # ── Upsert into raw_papers ──────────────────────────────────────────
+        try:
+            paper_id = str(uuid4())
+            cur = conn.cursor()
+            cur.execute(
+                """
+                INSERT INTO raw_papers
+                    (id, source, external_id, title, abstract, authors, journal,
+                     doi, published_date, status, raw_metadata, created_at, updated_at)
+                VALUES (%s, 'crossref', %s, %s, %s, %s, %s, %s, %s, 'fetched', %s, NOW(), NOW())
+                ON CONFLICT (source, external_id) DO UPDATE SET
+                    title = EXCLUDED.title,
+                    abstract = COALESCE(EXCLUDED.abstract, raw_papers.abstract),
+                    updated_at = NOW()
+                RETURNING id
+                """,
+                (
+                    paper_id,
+                    doi,
+                    title,
+                    abstract or None,
+                    json.dumps(authors),
+                    journal,
+                    doi,
+                    pub_date,
+                    json.dumps({"crossref": True, "has_abstract": bool(abstract)}),
+                ),
+            )
+            result = cur.fetchone()
+            conn.commit()
+            logger.info("Stored DOI %s: '%s' (abstract: %s)", doi, title[:60], bool(abstract))
+            return str(result[0]) if result else paper_id
+        except Exception as exc:
+            logger.warning("DB store failed for %s: %s", doi, exc)
 
         return None
 

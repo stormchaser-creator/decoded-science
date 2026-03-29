@@ -150,28 +150,32 @@ class PipelineQueue:
     # Dequeueing
     # ------------------------------------------------------------------
 
+    # Lua script: atomically pop from sorted set + update job status
+    _DEQUEUE_LUA = """
+    local result = redis.call('ZPOPMAX', KEYS[1], 1)
+    if #result == 0 then return nil end
+    local job_id = result[1]
+    local job_key = ARGV[1] .. job_id
+    local raw = redis.call('GET', job_key)
+    if not raw then return nil end
+    return {job_id, raw}
+    """
+
     def dequeue(self, queue: str, timeout: int = 0) -> Job | None:
-        """Pop the highest-priority job from the queue."""
-        # ZPOPMAX returns list of (member, score) pairs
-        result = self._redis.zpopmax(queue, 1)
+        """Pop the highest-priority job from the queue (atomic via Lua)."""
+        result = self._redis.eval(self._DEQUEUE_LUA, 1, queue, JOB_KEY_PREFIX)
         if not result:
             if timeout > 0:
-                # Blocking wait using a helper loop
                 deadline = time.time() + timeout
                 while time.time() < deadline:
-                    result = self._redis.zpopmax(queue, 1)
+                    result = self._redis.eval(self._DEQUEUE_LUA, 1, queue, JOB_KEY_PREFIX)
                     if result:
                         break
-                    time.sleep(0.1)
+                    time.sleep(0.5)  # 0.5s polling (reduced from 0.1s)
             if not result:
                 return None
 
-        job_id, _score = result[0]
-        raw = self._redis.get(f"{JOB_KEY_PREFIX}{job_id}")
-        if not raw:
-            logger.warning("job_data_missing", job_id=job_id)
-            return None
-
+        job_id, raw = result[0], result[1]
         job = Job.from_dict(json.loads(raw))
         job.status = JobStatus.PROCESSING
         job.attempts += 1
@@ -186,7 +190,8 @@ class PipelineQueue:
     def complete(self, job: Job) -> None:
         job.status = JobStatus.COMPLETED
         job.completed_at = time.time()
-        self._redis.set(f"{JOB_KEY_PREFIX}{job.job_id}", json.dumps(job.to_dict()))
+        # Keep completed jobs for 24h then auto-expire
+        self._redis.setex(f"{JOB_KEY_PREFIX}{job.job_id}", 86400, json.dumps(job.to_dict()))
         logger.info("job_completed", job_id=job.job_id, job_type=job.job_type)
 
     def fail(self, job: Job, error: str, requeue: bool = True) -> None:
@@ -200,7 +205,8 @@ class PipelineQueue:
         else:
             job.status = JobStatus.DEAD
             job.completed_at = time.time()
-            self._redis.set(f"{JOB_KEY_PREFIX}{job.job_id}", json.dumps(job.to_dict()))
+            # Keep dead jobs for 7 days then auto-expire
+            self._redis.setex(f"{JOB_KEY_PREFIX}{job.job_id}", 604800, json.dumps(job.to_dict()))
             self._redis.zadd(QUEUE_DEAD, {job.job_id: time.time()})
             logger.error("job_dead", job_id=job.job_id, error=error)
 

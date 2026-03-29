@@ -11,7 +11,15 @@ from typing import Optional
 
 from jose import JWTError, jwt
 
-SECRET_KEY = os.environ.get("DECODED_JWT_SECRET", "decoded-dev-secret-change-in-prod")
+SECRET_KEY = os.environ.get("DECODED_JWT_SECRET", "")
+if not SECRET_KEY:
+    import warnings
+    warnings.warn(
+        "DECODED_JWT_SECRET is not set — using a random ephemeral secret. "
+        "Tokens will not survive restarts. Set DECODED_JWT_SECRET in your environment.",
+        stacklevel=1,
+    )
+    SECRET_KEY = secrets.token_hex(32)
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
 

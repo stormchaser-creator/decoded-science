@@ -3,7 +3,7 @@
 -- Populated by the discover_field_gaps job
 
 CREATE TABLE IF NOT EXISTS field_gaps (
-    id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     description         TEXT NOT NULL,
     discipline          VARCHAR(100),
     related_mechanisms  JSONB DEFAULT '[]',
