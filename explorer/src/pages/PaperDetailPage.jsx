@@ -396,46 +396,39 @@ export default function PaperDetailPage() {
             </div>
           )}
 
-          {/* Connections sorted by novelty */}
-          {sortedConns.length > 0 && (
-            <div style={s.card}>
-              <div style={{ ...s.sectionTitle, marginBottom: '8px' }}>
-                Connections ({sortedConns.length})
-                <span style={{ fontSize: '10px', color: '#4b4b6b', marginLeft: '6px', fontWeight: '400', textTransform: 'none', letterSpacing: 0 }}>sorted by novelty</span>
+          {/* Connection type summary */}
+          {sortedConns.length > 0 && (() => {
+            const groups = {}
+            sortedConns.forEach(c => {
+              const t = c.connection_type || 'other'
+              if (!groups[t]) groups[t] = []
+              groups[t].push(c)
+            })
+            return (
+              <div style={s.card}>
+                <div style={{ ...s.sectionTitle, marginBottom: '12px' }}>
+                  Connections ({sortedConns.length})
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                  {Object.entries(groups).sort((a, b) => {
+                    const order = ['contradicts', 'extends', 'mechanism_for', 'convergent_evidence', 'shares_target', 'methodological_parallel']
+                    return (order.indexOf(a[0]) === -1 ? 99 : order.indexOf(a[0])) - (order.indexOf(b[0]) === -1 ? 99 : order.indexOf(b[0]))
+                  }).map(([type, items]) => (
+                    <button key={type} onClick={() => {
+                      const el = document.getElementById(`conn-group-${type}`)
+                      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                    }} style={{
+                      background: 'transparent', border: `1px solid ${EDGE_COLORS[type] || EDGE_COLORS.default}`,
+                      color: EDGE_COLORS[type] || EDGE_COLORS.default, borderRadius: '12px',
+                      padding: '4px 10px', fontSize: '11px', cursor: 'pointer', fontWeight: '600',
+                    }}>
+                      {type.replace(/_/g, ' ')} ({items.length})
+                    </button>
+                  ))}
+                </div>
               </div>
-              {sortedConns.map((c, i) => {
-                const isA = String(c.paper_a_id) === String(id)
-                const otherId = isA ? c.paper_b_id : c.paper_a_id
-                const otherTitle = isA ? c.paper_b_title : c.paper_a_title
-                const borderColor = EDGE_COLORS[c.connection_type] || EDGE_COLORS.default
-                return (
-                  <div key={c.id || i} style={{
-                    borderLeft: `3px solid ${borderColor}`,
-                    paddingLeft: '12px',
-                    marginBottom: '12px',
-                    paddingBottom: '12px',
-                    borderBottom: i < sortedConns.length - 1 ? '1px solid #1a1a2e' : 'none',
-                  }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
-                      <TypeTag type={c.connection_type} />
-                      <div style={{ display: 'flex', gap: '10px', fontSize: '10px', color: '#4b4b6b' }}>
-                        <span>Conf: {((c.confidence || 0) * 100).toFixed(0)}%</span>
-                        {c.novelty_score != null && <span>Novelty: {((c.novelty_score || 0) * 100).toFixed(0)}%</span>}
-                      </div>
-                    </div>
-                    <Link to={`/papers/${otherId}`} style={{ fontSize: '13px', color: '#c4bef8', lineHeight: '1.5', textDecoration: 'none', fontWeight: '500' }}>
-                      {otherTitle || 'Untitled'}
-                    </Link>
-                    {c.description && (
-                      <p style={{ fontSize: '12px', color: '#9991d0', margin: '6px 0 0', lineHeight: '1.7' }}>
-                        {c.description}
-                      </p>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
-          )}
+            )
+          })()}
 
           {/* Request Analysis button */}
           <div style={{ ...s.card, marginTop: '12px', textAlign: 'center' }}>
@@ -451,6 +444,78 @@ export default function PaperDetailPage() {
           </div>
         </div>
       </div>
+
+      {/* CONNECTIONS — full width below the 2-column layout, grouped by type */}
+      {sortedConns.length > 0 && (() => {
+        const groups = {}
+        sortedConns.forEach(c => {
+          const t = c.connection_type || 'other'
+          if (!groups[t]) groups[t] = []
+          groups[t].push(c)
+        })
+        const typeOrder = ['contradicts', 'extends', 'mechanism_for', 'convergent_evidence', 'shares_target', 'methodological_parallel']
+        const sortedGroups = Object.entries(groups).sort((a, b) => {
+          return (typeOrder.indexOf(a[0]) === -1 ? 99 : typeOrder.indexOf(a[0])) - (typeOrder.indexOf(b[0]) === -1 ? 99 : typeOrder.indexOf(b[0]))
+        })
+        return (
+          <div style={{ marginTop: '20px' }}>
+            <h2 style={{ fontSize: '16px', fontWeight: '700', color: '#e0e0e8', marginBottom: '16px' }}>
+              Connections ({sortedConns.length})
+            </h2>
+            {sortedGroups.map(([type, items]) => {
+              const borderColor = EDGE_COLORS[type] || EDGE_COLORS.default
+              const [expanded, setExpanded] = React.useState(items.length <= 5)
+              const shown = expanded ? items : items.slice(0, 5)
+              return (
+                <div key={type} id={`conn-group-${type}`} style={{ ...s.card, marginBottom: '12px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
+                    <div style={{ width: '4px', height: '20px', background: borderColor, borderRadius: '2px' }} />
+                    <span style={{ fontSize: '13px', fontWeight: '700', color: borderColor, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                      {type.replace(/_/g, ' ')}
+                    </span>
+                    <span style={{ fontSize: '11px', color: '#4b4b6b' }}>({items.length})</span>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '10px' }}>
+                    {shown.map((c, i) => {
+                      const isA = String(c.paper_a_id) === String(id)
+                      const otherId = isA ? c.paper_b_id : c.paper_a_id
+                      const otherTitle = isA ? c.paper_b_title : c.paper_a_title
+                      return (
+                        <div key={c.id || i} style={{
+                          background: '#0e0e1a', borderRadius: '8px', padding: '12px',
+                          borderLeft: `3px solid ${borderColor}`,
+                        }}>
+                          <Link to={`/papers/${otherId}`} style={{ fontSize: '12px', color: '#c4bef8', lineHeight: '1.5', textDecoration: 'none', fontWeight: '500', display: 'block', marginBottom: '6px' }}>
+                            {otherTitle || 'Untitled'}
+                          </Link>
+                          {c.description && (
+                            <p style={{ fontSize: '11px', color: '#7a74a8', margin: 0, lineHeight: '1.6' }}>
+                              {c.description.length > 200 ? c.description.substring(0, 200) + '…' : c.description}
+                            </p>
+                          )}
+                          <div style={{ display: 'flex', gap: '10px', marginTop: '6px', fontSize: '10px', color: '#4b4b6b' }}>
+                            <span>Conf: {((c.confidence || 0) * 100).toFixed(0)}%</span>
+                            {c.novelty_score != null && <span>Novelty: {((c.novelty_score || 0) * 100).toFixed(0)}%</span>}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                  {items.length > 5 && (
+                    <button onClick={() => setExpanded(!expanded)} style={{
+                      background: 'transparent', border: '1px solid #2d2060', color: '#7c6af7',
+                      borderRadius: '6px', padding: '6px 14px', fontSize: '11px', cursor: 'pointer',
+                      marginTop: '10px', width: '100%',
+                    }}>
+                      {expanded ? `Show fewer` : `Show all ${items.length} ${type.replace(/_/g, ' ')} connections`}
+                    </button>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )
+      })()}
     </div>
   )
 }
