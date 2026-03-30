@@ -1938,6 +1938,102 @@ def get_cached_bridge(concept_a: str, concept_b: str):
 # Pearl integration (admin-only)
 # ---------------------------------------------------------------------------
 
+@app.get("/v1/pearl/corpus-overview")
+def pearl_corpus_overview():
+    """Comprehensive corpus overview for Pearl — schema, stats, distributions."""
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+    overview = {}
+
+    # Basic counts
+    cur.execute("SELECT count(*) as n FROM raw_papers")
+    overview["total_papers"] = cur.fetchone()["n"]
+    cur.execute("SELECT count(*) as n FROM raw_papers WHERE full_text IS NOT NULL")
+    overview["full_text_papers"] = cur.fetchone()["n"]
+    cur.execute("SELECT count(*) as n FROM extraction_results")
+    overview["extractions"] = cur.fetchone()["n"]
+    cur.execute("SELECT count(*) as n FROM discovered_connections")
+    overview["connections"] = cur.fetchone()["n"]
+    cur.execute("SELECT count(*) as n FROM paper_critiques WHERE COALESCE(brief_confidence,'') != 'insufficient'")
+    overview["active_briefs"] = cur.fetchone()["n"]
+    cur.execute("SELECT count(*) as n FROM kb_entries WHERE workstation = 'decoded_connectome'")
+    overview["pearl_kb_entries"] = cur.fetchone()["n"]
+
+    # Source distribution
+    cur.execute("SELECT source, count(*) as n FROM raw_papers GROUP BY source ORDER BY n DESC")
+    overview["papers_by_source"] = {r["source"]: r["n"] for r in cur.fetchall()}
+
+    # Data source (full_text vs abstract)
+    cur.execute("SELECT data_source, count(*) as n FROM raw_papers GROUP BY data_source ORDER BY n DESC")
+    overview["papers_by_data_source"] = {r["data_source"]: r["n"] for r in cur.fetchall()}
+
+    # Connection types
+    cur.execute("SELECT connection_type, count(*) as n FROM discovered_connections GROUP BY connection_type ORDER BY n DESC")
+    overview["connections_by_type"] = {r["connection_type"]: r["n"] for r in cur.fetchall()}
+
+    # Topic distribution (from papers with briefs)
+    cur.execute("""
+        SELECT unnest(topic_tags) as topic, count(*) as n
+        FROM raw_papers WHERE topic_tags != '{}'
+        GROUP BY topic ORDER BY n DESC
+    """)
+    overview["papers_by_topic"] = {r["topic"]: r["n"] for r in cur.fetchall()}
+
+    # Brief quality distribution
+    cur.execute("""
+        SELECT overall_quality, count(*) as n FROM paper_critiques
+        WHERE COALESCE(brief_confidence,'') != 'insufficient'
+        GROUP BY overall_quality ORDER BY n DESC
+    """)
+    overview["briefs_by_quality"] = {r["overall_quality"]: r["n"] for r in cur.fetchall()}
+
+    # Top 10 most connected papers
+    cur.execute("""
+        SELECT p.title, count(*) as connections
+        FROM raw_papers p
+        JOIN discovered_connections dc ON dc.paper_a_id = p.id OR dc.paper_b_id = p.id
+        GROUP BY p.id, p.title ORDER BY connections DESC LIMIT 10
+    """)
+    overview["hub_papers"] = [{"title": r["title"], "connections": r["connections"]} for r in cur.fetchall()]
+
+    # Study design distribution
+    cur.execute("""
+        SELECT study_design, count(*) as n FROM extraction_results
+        GROUP BY study_design ORDER BY n DESC LIMIT 10
+    """)
+    overview["study_designs"] = {r["study_design"]: r["n"] for r in cur.fetchall()}
+
+    # Total LLM spend
+    cur.execute("SELECT COALESCE(sum(cost_usd),0) as n FROM extraction_results")
+    ext_cost = float(cur.fetchone()["n"])
+    cur.execute("SELECT COALESCE(sum(cost_usd),0) as n FROM paper_critiques")
+    crit_cost = float(cur.fetchone()["n"])
+    cur.execute("SELECT COALESCE(sum(cost_usd),0) as n FROM discovered_connections")
+    conn_cost = float(cur.fetchone()["n"])
+    overview["total_llm_cost_usd"] = round(ext_cost + crit_cost + conn_cost, 2)
+
+    # Schema reference
+    overview["tables"] = {
+        "raw_papers": "Papers with title, abstract, full_text, authors, journal, doi, topic_tags[], data_source, status",
+        "extraction_results": "AI-extracted entities (jsonb[]), claims (jsonb[]), mechanisms (jsonb[]), key_findings, study_design, population",
+        "discovered_connections": "AI-discovered relationships: paper_a_id <-> paper_b_id, connection_type (contradicts/extends/mechanism_for/convergent_evidence/shares_target/entity_cooccurrence), description, confidence",
+        "paper_critiques": "Intelligence briefs: overall_quality, methodology_score, novelty_score, summary, strengths[], weaknesses[], red_flags[], recommendation, brief_confidence",
+        "kb_entries": "Pearl's knowledge base entries bridged from Decoded (workstation='decoded_connectome')",
+    }
+
+    overview["query_examples"] = [
+        "SELECT title, topic_tags FROM raw_papers WHERE 'aging' = ANY(topic_tags) LIMIT 10",
+        "SELECT connection_type, count(*) FROM discovered_connections GROUP BY connection_type",
+        "SELECT p.title, pc.summary FROM paper_critiques pc JOIN raw_papers p ON p.id = pc.paper_id WHERE pc.overall_quality = 'high' ORDER BY pc.novelty_score DESC LIMIT 5",
+        "SELECT jsonb_array_elements(e.entities)->>'name' as entity, count(*) FROM extraction_results e, jsonb_array_elements(e.entities) GROUP BY entity ORDER BY count DESC LIMIT 20",
+        "SELECT p.title, dc.connection_type, dc.description FROM discovered_connections dc JOIN raw_papers p ON p.id = dc.paper_b_id WHERE dc.connection_type = 'contradicts' LIMIT 10",
+    ]
+
+    release_db(conn)
+    return overview
+
+
 @app.post("/v1/pearl/share")
 def share_with_pearl(
     paper_id: str = Body(..., embed=True),
