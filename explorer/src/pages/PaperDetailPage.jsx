@@ -42,7 +42,7 @@ function MiniGraph({ paperId, connections }) {
   if (nodes.length < 2) return null
 
   return (
-    <Suspense fallback={<div style={{ height: '300px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280', fontSize: '12px' }}>Loading graph…</div>}>
+    <Suspense fallback={<div style={{ height: '300px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280', fontSize: '14px' }}>Loading graph…</div>}>
       <ForceGraph2D
         graphData={{ nodes, links }}
         width={300}
@@ -70,10 +70,10 @@ function ConnGroup({ type, items, paperId, isMobile }) {
     <div id={`conn-group-${type}`} style={{ ...{ background: '#12121e', borderRadius: '8px', padding: '16px' }, marginBottom: '12px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
         <div style={{ width: '4px', height: '20px', background: borderColor, borderRadius: '2px' }} />
-        <span style={{ fontSize: '13px', fontWeight: '700', color: borderColor, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+        <span style={{ fontSize: '14px', fontWeight: '700', color: borderColor, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
           {type.replace(/_/g, ' ')}
         </span>
-        <span style={{ fontSize: '11px', color: '#4b4b6b' }}>({items.length})</span>
+        <span style={{ fontSize: '14px', color: '#4b4b6b' }}>({items.length})</span>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '10px' }}>
         {shown.map((c, i) => {
@@ -85,11 +85,11 @@ function ConnGroup({ type, items, paperId, isMobile }) {
               background: '#0e0e1a', borderRadius: '8px', padding: '12px',
               borderLeft: `3px solid ${borderColor}`,
             }}>
-              <Link to={`/papers/${otherId}`} style={{ fontSize: '12px', color: '#c4bef8', lineHeight: '1.5', textDecoration: 'none', fontWeight: '500', display: 'block', marginBottom: '6px' }}>
+              <Link to={`/papers/${otherId}`} style={{ fontSize: '14px', color: '#c4bef8', lineHeight: '1.5', textDecoration: 'none', fontWeight: '500', display: 'block', marginBottom: '6px' }}>
                 {otherTitle || 'Untitled'}
               </Link>
               {c.description && (
-                <p style={{ fontSize: '11px', color: '#7a74a8', margin: 0, lineHeight: '1.6' }}>
+                <p style={{ fontSize: '14px', color: '#7a74a8', margin: 0, lineHeight: '1.6' }}>
                   {c.description}
                 </p>
               )}
@@ -104,7 +104,7 @@ function ConnGroup({ type, items, paperId, isMobile }) {
       {items.length > 5 && (
         <button onClick={() => setExpanded(!expanded)} style={{
           background: 'transparent', border: '1px solid #2d2060', color: '#7c6af7',
-          borderRadius: '6px', padding: '6px 14px', fontSize: '11px', cursor: 'pointer',
+          borderRadius: '6px', padding: '6px 14px', fontSize: '14px', cursor: 'pointer',
           marginTop: '10px', width: '100%',
         }}>
           {expanded ? `Show fewer` : `Show all ${items.length} ${type.replace(/_/g, ' ')} connections`}
@@ -126,7 +126,7 @@ function ClaimItem({ claim }) {
       background: 'rgba(0,0,0,0.2)',
       borderRadius: '0 4px 4px 0',
     }}>
-      <div style={{ fontSize: '13px', color: '#a0a0b8', lineHeight: '1.6' }}>{text}</div>
+      <div style={{ fontSize: '14px', color: '#a0a0b8', lineHeight: '1.6' }}>{text}</div>
       {strength && (
         <div style={{ fontSize: '10px', color, marginTop: '3px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{strength}</div>
       )}
@@ -254,7 +254,7 @@ export default function PaperDetailPage() {
                 // Split on sentences and group ~3 per paragraph
                 const sentences = raw.split(/(?<=\.)\s+(?=[A-Z])/)
                 if (sentences.length <= 3) {
-                  return <p style={{ fontSize: '13px', color: '#a0a0b8', marginTop: '16px', lineHeight: '1.8' }}>{raw}</p>
+                  return <p style={{ fontSize: '14px', color: '#a0a0b8', marginTop: '16px', lineHeight: '1.8' }}>{raw}</p>
                 }
                 const paragraphs = []
                 for (let si = 0; si < sentences.length; si += 3) {
@@ -263,7 +263,7 @@ export default function PaperDetailPage() {
                 return (
                   <div style={{ marginTop: '16px' }}>
                     {paragraphs.map((p, i) => (
-                      <p key={i} style={{ fontSize: '13px', color: '#a0a0b8', lineHeight: '1.8', margin: '0 0 12px' }}>{p}</p>
+                      <p key={i} style={{ fontSize: '14px', color: '#a0a0b8', lineHeight: '1.8', margin: '0 0 12px' }}>{p}</p>
                     ))}
                   </div>
                 )
@@ -296,7 +296,7 @@ export default function PaperDetailPage() {
                 sections.push({ label: lastLabel, text: raw.substring(lastIndex).trim() })
               }
               if (sections.length === 0) {
-                return <p style={{ fontSize: '13px', color: '#a0a0b8', marginTop: '16px', lineHeight: '1.8' }}>{raw}</p>
+                return <p style={{ fontSize: '14px', color: '#a0a0b8', marginTop: '16px', lineHeight: '1.8' }}>{raw}</p>
               }
               const sectionColors = {
                 background: '#60a5fa', introduction: '#60a5fa', context: '#60a5fa',
@@ -314,14 +314,14 @@ export default function PaperDetailPage() {
                     <div key={i} style={{ marginBottom: '14px' }}>
                       {sec.label && (
                         <div style={{
-                          fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px',
+                          fontSize: '14px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px',
                           color: sectionColors[sec.label.toLowerCase()] || '#7c6af7', marginBottom: '4px',
                         }}>
                           {sec.label}
                         </div>
                       )}
                       <p style={{
-                        fontSize: '13px', color: '#a0a0b8', lineHeight: '1.8', margin: 0,
+                        fontSize: '14px', color: '#a0a0b8', lineHeight: '1.8', margin: 0,
                         paddingLeft: sec.label ? '12px' : '0',
                         borderLeft: sec.label ? `2px solid ${sectionColors[sec.label.toLowerCase()] || '#2d2060'}33` : 'none',
                       }}>
@@ -342,9 +342,9 @@ export default function PaperDetailPage() {
               if (findings.length === 0) return null
               return (
                 <div style={{ marginTop: '16px' }}>
-                  <div style={{ fontSize: '11px', color: '#6b7280', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '10px' }}>Key Findings</div>
+                  <div style={{ fontSize: '14px', color: '#6b7280', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '10px' }}>Key Findings</div>
                   {findings.map((f, i) => (
-                    <div key={i} style={{ fontSize: '13px', color: '#a0a0b8', lineHeight: '1.7', marginBottom: '8px', paddingLeft: '14px', borderLeft: '2px solid #2d2060' }}>
+                    <div key={i} style={{ fontSize: '14px', color: '#a0a0b8', lineHeight: '1.7', marginBottom: '8px', paddingLeft: '14px', borderLeft: '2px solid #2d2060' }}>
                       {typeof f === 'string' ? f : JSON.stringify(f)}
                     </div>
                   ))}
@@ -424,8 +424,8 @@ export default function PaperDetailPage() {
                     : null
                   return (
                     <div key={i} style={{ borderLeft: `3px solid ${EPISTEMIC.hypothesis}`, paddingLeft: '10px', paddingTop: '4px', paddingBottom: '4px' }}>
-                      <div style={{ fontSize: '13px', color: '#93c5fd', lineHeight: '1.6' }}>{desc}</div>
-                      {subtext && <div style={{ fontSize: '11px', color: '#4b5563', marginTop: '2px', fontFamily: 'monospace' }}>{subtext}</div>}
+                      <div style={{ fontSize: '14px', color: '#93c5fd', lineHeight: '1.6' }}>{desc}</div>
+                      {subtext && <div style={{ fontSize: '14px', color: '#4b5563', marginTop: '2px', fontFamily: 'monospace' }}>{subtext}</div>}
                     </div>
                   )
                 })}
@@ -439,8 +439,8 @@ export default function PaperDetailPage() {
               <div style={s.sectionTitle}>Intelligence Brief</div>
               <div style={{ background: '#1a1500', border: '1px solid #3d2e00', borderRadius: '8px', padding: '16px', marginTop: '12px', textAlign: 'center' }}>
                 <div style={{ fontSize: '24px', marginBottom: '8px' }}>&#9888;</div>
-                <div style={{ fontSize: '13px', color: '#fbbf24', fontWeight: '600', marginBottom: '6px' }}>Insufficient Data for Analysis</div>
-                <div style={{ fontSize: '12px', color: '#9991d0', lineHeight: '1.6' }}>
+                <div style={{ fontSize: '14px', color: '#fbbf24', fontWeight: '600', marginBottom: '6px' }}>Insufficient Data for Analysis</div>
+                <div style={{ fontSize: '14px', color: '#9991d0', lineHeight: '1.6' }}>
                   This paper {paper.data_source === 'abstract_only' ? 'only has an abstract available — no full text was found' : 'has limited extracted data'}.
                   The system requires enough entities and claims to generate a reliable intelligence brief.
                   {paper.source === 'medrxiv' || paper.source === 'biorxiv' ? ' Full text may become available as preprint servers update.' : ''}
@@ -452,7 +452,7 @@ export default function PaperDetailPage() {
             <div style={{ ...s.card, marginTop: '12px', padding: '20px' }}>
               {/* Data quality warning */}
               {(critique.brief_confidence === 'low' || (!critique.brief_confidence && paper.data_source === 'abstract_only')) && (
-                <div style={{ background: '#1a1500', border: '1px solid #3d2e00', borderRadius: '6px', padding: '10px 14px', marginBottom: '14px', fontSize: '12px', color: '#fbbf24', lineHeight: '1.6' }}>
+                <div style={{ background: '#1a1500', border: '1px solid #3d2e00', borderRadius: '6px', padding: '10px 14px', marginBottom: '14px', fontSize: '14px', color: '#fbbf24', lineHeight: '1.6' }}>
                   This analysis was generated from {paper.data_source === 'abstract_only' ? 'the abstract only — full paper text was not available' : 'limited data'}. Scores and assessments may not reflect the full paper.
                 </div>
               )}
@@ -499,7 +499,7 @@ export default function PaperDetailPage() {
 
               {/* Summary */}
               {(critique.summary || critique.brief) && (
-                <p style={{ fontSize: '13px', color: '#c4bef8', lineHeight: '1.8', margin: '0 0 16px', borderLeft: '3px solid #2d2060', paddingLeft: '12px' }}>
+                <p style={{ fontSize: '14px', color: '#c4bef8', lineHeight: '1.8', margin: '0 0 16px', borderLeft: '3px solid #2d2060', paddingLeft: '12px' }}>
                   {critique.summary || critique.brief}
                 </p>
               )}
@@ -507,9 +507,9 @@ export default function PaperDetailPage() {
               {/* Strengths */}
               {critique.strengths && critique.strengths.length > 0 && (
                 <div style={{ marginBottom: '14px' }}>
-                  <div style={{ fontSize: '11px', fontWeight: '700', color: '#4ade80', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px' }}>Strengths</div>
+                  <div style={{ fontSize: '14px', fontWeight: '700', color: '#4ade80', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px' }}>Strengths</div>
                   {(typeof critique.strengths === 'string' ? [critique.strengths] : critique.strengths).map((s, i) => (
-                    <div key={i} style={{ fontSize: '12px', color: '#9991d0', lineHeight: '1.7', marginBottom: '6px', paddingLeft: '12px', borderLeft: '2px solid #0d2010' }}>
+                    <div key={i} style={{ fontSize: '14px', color: '#9991d0', lineHeight: '1.7', marginBottom: '6px', paddingLeft: '12px', borderLeft: '2px solid #0d2010' }}>
                       {typeof s === 'string' ? s : s.text || JSON.stringify(s)}
                     </div>
                   ))}
@@ -519,9 +519,9 @@ export default function PaperDetailPage() {
               {/* Weaknesses */}
               {critique.weaknesses && critique.weaknesses.length > 0 && (
                 <div style={{ marginBottom: '14px' }}>
-                  <div style={{ fontSize: '11px', fontWeight: '700', color: '#fbbf24', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px' }}>Weaknesses</div>
+                  <div style={{ fontSize: '14px', fontWeight: '700', color: '#fbbf24', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px' }}>Weaknesses</div>
                   {(typeof critique.weaknesses === 'string' ? [critique.weaknesses] : critique.weaknesses).map((w, i) => (
-                    <div key={i} style={{ fontSize: '12px', color: '#9991d0', lineHeight: '1.7', marginBottom: '6px', paddingLeft: '12px', borderLeft: '2px solid #1a1500' }}>
+                    <div key={i} style={{ fontSize: '14px', color: '#9991d0', lineHeight: '1.7', marginBottom: '6px', paddingLeft: '12px', borderLeft: '2px solid #1a1500' }}>
                       {typeof w === 'string' ? w : w.text || JSON.stringify(w)}
                     </div>
                   ))}
@@ -531,9 +531,9 @@ export default function PaperDetailPage() {
               {/* Red Flags */}
               {critique.red_flags && critique.red_flags.length > 0 && (
                 <div>
-                  <div style={{ fontSize: '11px', fontWeight: '700', color: '#f87171', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px' }}>Red Flags</div>
+                  <div style={{ fontSize: '14px', fontWeight: '700', color: '#f87171', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px' }}>Red Flags</div>
                   {(typeof critique.red_flags === 'string' ? [critique.red_flags] : critique.red_flags).map((r, i) => (
-                    <div key={i} style={{ fontSize: '12px', color: '#9991d0', lineHeight: '1.7', marginBottom: '6px', paddingLeft: '12px', borderLeft: '2px solid #1a0808' }}>
+                    <div key={i} style={{ fontSize: '14px', color: '#9991d0', lineHeight: '1.7', marginBottom: '6px', paddingLeft: '12px', borderLeft: '2px solid #1a0808' }}>
                       {typeof r === 'string' ? r : r.text || JSON.stringify(r)}
                     </div>
                   ))}
@@ -579,7 +579,7 @@ export default function PaperDetailPage() {
                     }} style={{
                       background: 'transparent', border: `1px solid ${EDGE_COLORS[type] || EDGE_COLORS.default}`,
                       color: EDGE_COLORS[type] || EDGE_COLORS.default, borderRadius: '12px',
-                      padding: '4px 10px', fontSize: '11px', cursor: 'pointer', fontWeight: '600',
+                      padding: '4px 10px', fontSize: '14px', cursor: 'pointer', fontWeight: '600',
                     }}>
                       {type.replace(/_/g, ' ')} ({items.length})
                     </button>
