@@ -236,6 +236,18 @@ def get_current_user(authorization: Optional[str] = Header(None)) -> dict:
     return payload
 
 
+def get_admin_user(current_user: dict = Depends(get_current_user)) -> dict:
+    """Require admin role. Returns 403 if not admin."""
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT role FROM decoded_users WHERE id = %s", (current_user["sub"],))
+    row = cur.fetchone()
+    release_db(conn)
+    if not row or row["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return current_user
+
+
 # ---------------------------------------------------------------------------
 # Health
 # ---------------------------------------------------------------------------
@@ -1796,6 +1808,129 @@ def get_cached_bridge(concept_a: str, concept_b: str):
     if not row:
         raise HTTPException(status_code=404, detail="No cached bridge result")
     return _jsonify_row(dict(row))
+
+
+# ---------------------------------------------------------------------------
+# Chat (admin-only, multi-model, streaming)
+# ---------------------------------------------------------------------------
+
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel as PydanticModel
+
+
+class ChatRequest(PydanticModel):
+    paper_id: str
+    message: str
+    model: str = "claude-sonnet-4-6"
+    history: list[dict] = []
+
+
+@app.get("/v1/chat/models")
+def list_chat_models(current_user: dict = Depends(get_admin_user)):
+    """List available chat models."""
+    from decoded.api.chat import MODELS
+    return {"models": {k: {"label": v["label"], "description": v["description"]} for k, v in MODELS.items()}}
+
+
+@app.post("/v1/chat")
+def chat_with_paper(req: ChatRequest, current_user: dict = Depends(get_admin_user)):
+    """Stream AI responses about a paper. Admin-only."""
+    import json as _json
+    from decoded.api.chat import build_paper_context, build_system_prompt, stream_chat, search_corpus, MODELS
+
+    if req.model not in MODELS:
+        raise HTTPException(status_code=400, detail=f"Unknown model: {req.model}. Available: {list(MODELS.keys())}")
+
+    conn = get_db()
+
+    # Build context
+    context = build_paper_context(conn, req.paper_id)
+    if not context.get("paper"):
+        release_db(conn)
+        raise HTTPException(status_code=404, detail="Paper not found")
+
+    # RAG: search corpus for additional context based on the user's question
+    rag_results = search_corpus(conn, req.message, limit=5)
+    rag_context = ""
+    if rag_results:
+        rag_lines = []
+        for r in rag_results:
+            if str(r["id"]) != req.paper_id:  # skip the current paper
+                rag_lines.append(f"  - {r['title']} ({r['journal'] or 'Unknown'}, {str(r.get('published_date', ''))[:4]})")
+        if rag_lines:
+            rag_context = "\n\nADDITIONAL CORPUS RESULTS for user's query:\n" + "\n".join(rag_lines[:5])
+
+    system_prompt = build_system_prompt(context) + rag_context
+
+    # Build messages (include history)
+    messages = []
+    for h in req.history[-10:]:  # keep last 10 messages
+        messages.append({"role": h.get("role", "user"), "content": h.get("content", "")})
+    messages.append({"role": "user", "content": req.message})
+
+    # Save user message
+    user_id = current_user["sub"]
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO chat_messages (paper_id, user_id, role, content, model) VALUES (%s, %s, 'user', %s, %s)",
+            (req.paper_id, user_id, req.message, req.model),
+        )
+        conn.commit()
+    except Exception:
+        pass
+
+    release_db(conn)
+
+    def event_stream():
+        full_response = ""
+        final_usage = {}
+        for chunk in stream_chat(req.model, system_prompt, messages):
+            if "delta" in chunk:
+                full_response += chunk["delta"]
+            yield f"data: {_json.dumps(chunk)}\n\n"
+            if chunk.get("done"):
+                final_usage = chunk
+
+        # Save assistant response
+        try:
+            sconn = get_db()
+            scur = sconn.cursor()
+            scur.execute(
+                """INSERT INTO chat_messages (paper_id, user_id, role, content, model,
+                   prompt_tokens, completion_tokens, cost_usd)
+                   VALUES (%s, %s, 'assistant', %s, %s, %s, %s, %s)""",
+                (
+                    req.paper_id, user_id, full_response, req.model,
+                    final_usage.get("usage", {}).get("input_tokens", 0),
+                    final_usage.get("usage", {}).get("output_tokens", 0),
+                    final_usage.get("cost_usd", 0),
+                ),
+            )
+            sconn.commit()
+            release_db(sconn)
+        except Exception:
+            pass
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@app.get("/v1/chat/{paper_id}/history")
+def get_chat_history(paper_id: str, current_user: dict = Depends(get_admin_user)):
+    """Get chat history for a paper."""
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute(
+        """SELECT role, content, model, cost_usd, created_at
+           FROM chat_messages
+           WHERE paper_id = %s AND user_id = %s
+           ORDER BY created_at ASC
+           LIMIT 50""",
+        (paper_id, current_user["sub"]),
+    )
+    messages = [dict(r) for r in cur.fetchall()]
+    release_db(conn)
+    return {"messages": [_jsonify_row(m) for m in messages]}
 
 
 # ---------------------------------------------------------------------------

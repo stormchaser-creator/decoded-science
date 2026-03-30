@@ -2,7 +2,9 @@ import React, { useState, useEffect, Suspense } from 'react'
 import { Link, useParams, useNavigate } from 'react-router-dom'
 import { API, s, parseJsonField, connectionEpistemicColor, EPISTEMIC, useIsMobile } from '../shared.js'
 import { TypeTag, StrengthBar, Loading, ErrorMsg } from '../components/ui.jsx'
+import { useAuth } from '../auth.jsx'
 import SEO from '../components/SEO.jsx'
+import ChatPanel from '../components/ChatPanel.jsx'
 
 const ForceGraph2D = React.lazy(() => import('react-force-graph-2d'))
 
@@ -135,6 +137,7 @@ function ClaimItem({ claim }) {
 export default function PaperDetailPage() {
   const { id } = useParams()
   const isMobile = useIsMobile()
+  const { user, token } = useAuth()
   const [paper, setPaper] = useState(null)
   const [connections, setConnections] = useState([])
   const [critique, setCritique] = useState(null)
@@ -586,18 +589,12 @@ export default function PaperDetailPage() {
             )
           })()}
 
-          {/* Request Analysis button */}
-          <div style={{ ...s.card, marginTop: '12px', textAlign: 'center' }}>
-            <Link
-              to={`/analyze?doi=${encodeURIComponent(paper.doi || '')}`}
-              style={{ ...s.btn, display: 'inline-block', textDecoration: 'none', fontSize: '12px', padding: '8px 16px' }}
-            >
-              Request Analysis
-            </Link>
-            <div style={{ fontSize: '11px', color: '#4b4b6b', marginTop: '6px' }}>
-              Re-run extraction & connection discovery
+          {/* AI Chat — admin only */}
+          {user?.role === 'admin' && token && (
+            <div style={{ marginTop: '12px' }}>
+              <ChatPanel paperId={id} token={token} connections={connections} />
             </div>
-          </div>
+          )}
         </div>
       </div>
 
