@@ -247,8 +247,23 @@ export default function PaperDetailPage() {
                 return re.test(raw)
               })
               if (!hasStructure) {
-                // Plain abstract — just render as paragraph
-                return <p style={{ fontSize: '13px', color: '#a0a0b8', marginTop: '16px', lineHeight: '1.8' }}>{raw}</p>
+                // Break long unstructured abstracts into readable paragraphs
+                // Split on sentences and group ~3 per paragraph
+                const sentences = raw.split(/(?<=\.)\s+(?=[A-Z])/)
+                if (sentences.length <= 3) {
+                  return <p style={{ fontSize: '13px', color: '#a0a0b8', marginTop: '16px', lineHeight: '1.8' }}>{raw}</p>
+                }
+                const paragraphs = []
+                for (let si = 0; si < sentences.length; si += 3) {
+                  paragraphs.push(sentences.slice(si, si + 3).join(' '))
+                }
+                return (
+                  <div style={{ marginTop: '16px' }}>
+                    {paragraphs.map((p, i) => (
+                      <p key={i} style={{ fontSize: '13px', color: '#a0a0b8', lineHeight: '1.8', margin: '0 0 12px' }}>{p}</p>
+                    ))}
+                  </div>
+                )
               }
               // Parse into sections
               const sections = []
@@ -350,8 +365,10 @@ export default function PaperDetailPage() {
                   {entities.map((e, i) => {
                     const name = typeof e === 'string' ? e : (e.name || e.text || JSON.stringify(e))
                     const conf = typeof e === 'object' ? e.confidence : null
+                    // Use just the short name for search (strip parenthetical like "GDF11 (Growth...)")
+                    const searchName = name.replace(/\s*\(.*?\)\s*$/, '').trim()
                     return (
-                      <Link key={i} to={`/papers?q=${encodeURIComponent(name)}`} style={{
+                      <Link key={i} to={`/papers?q=${encodeURIComponent(searchName)}`} style={{
                         ...s.tag,
                         borderLeft: `3px solid ${EPISTEMIC.interpretation}`,
                         marginTop: 0,

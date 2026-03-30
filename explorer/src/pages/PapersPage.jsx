@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { API, s, useIsMobile } from '../shared.js'
 import { ErrorMsg } from '../components/ui.jsx'
 import SEO from '../components/SEO.jsx'
@@ -8,8 +8,9 @@ const PAGE_SIZE = 50
 
 export default function PapersPage() {
   const isMobile = useIsMobile()
+  const [searchParams] = useSearchParams()
   const [papers, setPapers] = useState([])
-  const [searchQ, setSearchQ] = useState('')
+  const [searchQ, setSearchQ] = useState(searchParams.get('q') || '')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [skip, setSkip] = useState(0)
@@ -38,7 +39,16 @@ export default function PapersPage() {
     setLoading(false)
   }, [])
 
-  useEffect(() => { loadPapers('', skip) }, [skip])
+  // Load from URL query param on mount, or default list
+  const initQ = searchParams.get('q') || ''
+  useEffect(() => {
+    if (initQ) {
+      setSearchQ(initQ)
+      loadPapers(initQ, 0)
+    } else {
+      loadPapers('', skip)
+    }
+  }, [initQ, skip])
 
   const handleSearch = () => { setSkip(0); loadPapers(searchQ, 0) }
   const handleClear = () => { setSearchQ(''); setSkip(0); loadPapers('', 0) }
