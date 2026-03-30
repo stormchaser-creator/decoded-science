@@ -46,7 +46,7 @@ import redis
 import psycopg2
 import psycopg2.extras
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Query, BackgroundTasks, Depends, Header
+from fastapi import FastAPI, HTTPException, Query, Body, BackgroundTasks, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr
 from typing import Optional
