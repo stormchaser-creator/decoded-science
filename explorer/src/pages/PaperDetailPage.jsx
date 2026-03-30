@@ -185,14 +185,25 @@ export default function PaperDetailPage() {
                 {paper.abstract}
               </p>
             )}
-            {paper.key_findings && (
-              <div style={{ marginTop: '12px' }}>
-                <div style={{ fontSize: '11px', color: '#6b7280', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px' }}>Key Findings</div>
-                <p style={{ fontSize: '13px', color: '#a0a0b8', lineHeight: '1.7', margin: 0 }}>
-                  {typeof paper.key_findings === 'string' ? paper.key_findings : JSON.stringify(paper.key_findings)}
-                </p>
-              </div>
-            )}
+            {paper.key_findings && (() => {
+              let findings = paper.key_findings
+              if (typeof findings === 'string') {
+                try { findings = JSON.parse(findings) } catch { findings = [findings] }
+              }
+              if (!Array.isArray(findings)) findings = [findings]
+              findings = findings.filter(f => f && typeof f === 'string' && f.length > 10)
+              if (findings.length === 0) return null
+              return (
+                <div style={{ marginTop: '16px' }}>
+                  <div style={{ fontSize: '11px', color: '#6b7280', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '10px' }}>Key Findings</div>
+                  {findings.map((f, i) => (
+                    <div key={i} style={{ fontSize: '13px', color: '#a0a0b8', lineHeight: '1.7', marginBottom: '8px', paddingLeft: '14px', borderLeft: '2px solid #2d2060' }}>
+                      {typeof f === 'string' ? f : JSON.stringify(f)}
+                    </div>
+                  ))}
+                </div>
+              )
+            })()}
           </div>
 
           {/* Entities */}
@@ -400,26 +411,26 @@ export default function PaperDetailPage() {
                 return (
                   <div key={c.id || i} style={{
                     borderLeft: `3px solid ${borderColor}`,
-                    paddingLeft: '10px',
-                    marginBottom: '10px',
-                    paddingBottom: '10px',
+                    paddingLeft: '12px',
+                    marginBottom: '12px',
+                    paddingBottom: '12px',
                     borderBottom: i < sortedConns.length - 1 ? '1px solid #1a1a2e' : 'none',
                   }}>
-                    <div style={{ marginBottom: '4px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
                       <TypeTag type={c.connection_type} />
+                      <div style={{ display: 'flex', gap: '10px', fontSize: '10px', color: '#4b4b6b' }}>
+                        <span>Conf: {((c.confidence || 0) * 100).toFixed(0)}%</span>
+                        {c.novelty_score != null && <span>Novelty: {((c.novelty_score || 0) * 100).toFixed(0)}%</span>}
+                      </div>
                     </div>
-                    <Link to={`/papers/${otherId}`} style={{ fontSize: '12px', color: '#c4bef8', lineHeight: '1.4', textDecoration: 'none' }}>
-                      {(otherTitle || '').substring(0, 80)}{otherTitle?.length > 80 ? '…' : ''}
+                    <Link to={`/papers/${otherId}`} style={{ fontSize: '13px', color: '#c4bef8', lineHeight: '1.5', textDecoration: 'none', fontWeight: '500' }}>
+                      {otherTitle || 'Untitled'}
                     </Link>
                     {c.description && (
-                      <p style={{ fontSize: '11px', color: '#6b7280', margin: '4px 0 0', lineHeight: '1.5' }}>
-                        {c.description.substring(0, 120)}{c.description.length > 120 ? '…' : ''}
+                      <p style={{ fontSize: '12px', color: '#9991d0', margin: '6px 0 0', lineHeight: '1.7' }}>
+                        {c.description}
                       </p>
                     )}
-                    <div style={{ display: 'flex', gap: '12px', marginTop: '4px', fontSize: '10px', color: '#4b4b6b' }}>
-                      <span>Conf: {((c.confidence || 0) * 100).toFixed(0)}%</span>
-                      {c.novelty_score && <span>Novelty: {((c.novelty_score || 0) * 100).toFixed(0)}%</span>}
-                    </div>
                   </div>
                 )
               })}
