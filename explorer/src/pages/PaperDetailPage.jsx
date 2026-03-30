@@ -114,6 +114,61 @@ function ConnGroup({ type, items, paperId, isMobile }) {
   )
 }
 
+function ShareWithPearl({ paperId, token, paperTitle }) {
+  const [status, setStatus] = React.useState(null) // null | 'sharing' | 'shared' | 'error'
+  const [note, setNote] = React.useState('')
+
+  const share = async () => {
+    setStatus('sharing')
+    try {
+      const resp = await fetch(`${API}/v1/pearl/share`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ paper_id: paperId, note }),
+      })
+      if (resp.ok) {
+        setStatus('shared')
+        setNote('')
+      } else {
+        setStatus('error')
+      }
+    } catch {
+      setStatus('error')
+    }
+  }
+
+  if (status === 'shared') {
+    return (
+      <div style={{ ...s.card, background: '#0d2010', border: '1px solid #1a4020', textAlign: 'center', padding: '12px' }}>
+        <span style={{ color: '#4ade80', fontSize: '14px' }}>Shared with Pearl</span>
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ ...s.card, padding: '12px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+        <span style={{ fontSize: '16px' }}>{'\u{1F48E}'}</span>
+        <span style={{ fontSize: '13px', fontWeight: '600', color: '#c084fc' }}>Share with Pearl</span>
+      </div>
+      <input
+        style={{ ...s.input, marginBottom: '8px', fontSize: '13px' }}
+        placeholder="Add a note for Pearl (optional)..."
+        value={note}
+        onChange={e => setNote(e.target.value)}
+      />
+      <button
+        onClick={share}
+        disabled={status === 'sharing'}
+        style={{ ...s.btn, width: '100%', background: '#7c3aed', fontSize: '13px', opacity: status === 'sharing' ? 0.6 : 1 }}
+      >
+        {status === 'sharing' ? 'Sharing...' : 'Share Paper + Brief + Connections'}
+      </button>
+      {status === 'error' && <div style={{ color: '#f87171', fontSize: '12px', marginTop: '6px' }}>Failed to share. Try again.</div>}
+    </div>
+  )
+}
+
 function ClaimItem({ claim }) {
   const text = typeof claim === 'string' ? claim : (claim.text || claim.claim || JSON.stringify(claim))
   const strength = typeof claim === 'object' ? claim.evidence_strength : null
@@ -589,11 +644,16 @@ export default function PaperDetailPage() {
             )
           })()}
 
-          {/* AI Chat — admin only */}
+          {/* Admin tools */}
           {user?.role === 'admin' && token && (
-            <div style={{ marginTop: '12px' }}>
-              <ChatPanel paperId={id} token={token} connections={connections} />
-            </div>
+            <>
+              {/* Share with Pearl */}
+              <ShareWithPearl paperId={id} token={token} paperTitle={paper.title} />
+              {/* AI Chat */}
+              <div style={{ marginTop: '12px' }}>
+                <ChatPanel paperId={id} token={token} connections={connections} />
+              </div>
+            </>
           )}
         </div>
       </div>

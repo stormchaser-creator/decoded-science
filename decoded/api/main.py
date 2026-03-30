@@ -1935,6 +1935,132 @@ def get_cached_bridge(concept_a: str, concept_b: str):
 
 
 # ---------------------------------------------------------------------------
+# Pearl integration (admin-only)
+# ---------------------------------------------------------------------------
+
+@app.post("/v1/pearl/share")
+def share_with_pearl(
+    paper_id: str = Body(..., embed=True),
+    note: str = Body("", embed=True),
+    current_user: dict = Depends(get_admin_user),
+):
+    """Share a paper with Pearl — creates a high-priority kb_entry."""
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+    # Get paper + critique
+    cur.execute("SELECT * FROM raw_papers WHERE id = %s", (paper_id,))
+    paper = cur.fetchone()
+    if not paper:
+        release_db(conn)
+        raise HTTPException(status_code=404, detail="Paper not found")
+
+    cur.execute("""SELECT summary, strengths, weaknesses, overall_quality, recommendation
+                   FROM paper_critiques WHERE paper_id = %s AND COALESCE(brief_confidence,'') != 'insufficient'
+                   ORDER BY created_at DESC LIMIT 1""", (paper_id,))
+    critique = cur.fetchone()
+
+    # Get connections
+    cur.execute("""SELECT connection_type, description,
+                   CASE WHEN paper_a_id = %s THEN pb.title ELSE pa.title END as connected_title
+                   FROM discovered_connections dc
+                   LEFT JOIN raw_papers pa ON pa.id = dc.paper_a_id
+                   LEFT JOIN raw_papers pb ON pb.id = dc.paper_b_id
+                   WHERE dc.paper_a_id = %s OR dc.paper_b_id = %s
+                   ORDER BY dc.confidence DESC LIMIT 10""",
+                (paper_id, paper_id, paper_id))
+    conns = [dict(r) for r in cur.fetchall()]
+
+    # Build content for Pearl
+    content_parts = [f"SHARED PAPER: {paper['title']}"]
+    if paper.get("journal"):
+        content_parts.append(f"Journal: {paper['journal']}")
+    if paper.get("doi"):
+        content_parts.append(f"DOI: {paper['doi']}")
+    if paper.get("abstract"):
+        content_parts.append(f"\nAbstract: {paper['abstract'][:500]}")
+    if critique:
+        content_parts.append(f"\nIntelligence Brief ({critique['overall_quality']} quality, rec: {critique['recommendation']}):")
+        content_parts.append(str(critique["summary"] or ""))
+    if conns:
+        content_parts.append(f"\nConnections ({len(conns)}):")
+        for c in conns[:5]:
+            content_parts.append(f"  - [{c['connection_type']}] {c['connected_title']}")
+    if note:
+        content_parts.append(f"\nUser note: {note}")
+
+    import uuid as _uuid
+    entry_id = f"decoded-shared-{_uuid.uuid4().hex[:12]}"
+
+    cur.execute("""
+        INSERT INTO kb_entries (id, workstation, operation, entry_type, title, element, content,
+                                epistemic_tier, confidence, density, source_file, structured_data)
+        VALUES (%s, 'decoded_connectome', 'Synthesis', 'shared_paper', %s, %s, %s,
+                3, 'high', 'spirit', %s, %s)
+    """, (
+        entry_id,
+        f"Shared: {paper['title'][:100]}",
+        "shared_paper",
+        "\n".join(content_parts),
+        f"decoded/paper/{paper.get('doi') or paper_id}",
+        json.dumps({
+            "paper_id": str(paper["id"]),
+            "doi": paper.get("doi"),
+            "url": f"https://thedecodedhuman.com/papers/{paper['id']}",
+            "quality": critique["overall_quality"] if critique else None,
+            "recommendation": critique["recommendation"] if critique else None,
+            "user_note": note,
+            "shared_by": current_user.get("email", "admin"),
+            "connection_count": len(conns),
+        }),
+    ))
+    conn.commit()
+    release_db(conn)
+
+    return {"status": "shared", "entry_id": entry_id, "paper_title": paper["title"]}
+
+
+@app.get("/v1/pearl/paper/{paper_id}")
+def get_paper_for_pearl(paper_id: str):
+    """Full paper context endpoint for Pearl's URL recognition. Public read."""
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+    cur.execute("SELECT * FROM raw_papers WHERE id = %s", (paper_id,))
+    paper = cur.fetchone()
+    if not paper:
+        release_db(conn)
+        raise HTTPException(status_code=404, detail="Paper not found")
+
+    cur.execute("""SELECT entities, claims, key_findings, study_design, population, primary_outcome
+                   FROM extraction_results WHERE paper_id = %s""", (paper_id,))
+    extraction = cur.fetchone()
+
+    cur.execute("""SELECT * FROM paper_critiques WHERE paper_id = %s
+                   AND COALESCE(brief_confidence,'') != 'insufficient'
+                   ORDER BY created_at DESC LIMIT 1""", (paper_id,))
+    critique = cur.fetchone()
+
+    cur.execute("""SELECT connection_type, description, confidence,
+                   CASE WHEN paper_a_id = %s THEN pb.title ELSE pa.title END as connected_title
+                   FROM discovered_connections dc
+                   LEFT JOIN raw_papers pa ON pa.id = dc.paper_a_id
+                   LEFT JOIN raw_papers pb ON pb.id = dc.paper_b_id
+                   WHERE dc.paper_a_id = %s OR dc.paper_b_id = %s
+                   ORDER BY dc.confidence DESC LIMIT 20""",
+                (paper_id, paper_id, paper_id))
+    connections = [dict(r) for r in cur.fetchall()]
+
+    release_db(conn)
+    return {
+        "paper": _jsonify_row(dict(paper)),
+        "extraction": _jsonify_row(dict(extraction)) if extraction else None,
+        "critique": _jsonify_row(dict(critique)) if critique else None,
+        "connections": [_jsonify_row(c) for c in connections],
+    }
+
+
+# ---------------------------------------------------------------------------
 # Chat (admin-only, multi-model, streaming)
 # ---------------------------------------------------------------------------
 
