@@ -548,7 +548,7 @@ async def download_and_parse_article(
                     # Extract XML from tar.gz
                     with tarfile.open(fileobj=io.BytesIO(content)) as tar:
                         for member in tar.getmembers():
-                            if member.name.endswith(".xml"):
+                            if member.name.endswith(".xml") or member.name.endswith(".nxml"):
                                 f = tar.extractfile(member)
                                 if f:
                                     return "jats", f.read()
@@ -666,9 +666,15 @@ async def run_download_phase(
                 **parsed,
             }
 
-        _, is_new = insert_paper(conn, run_id, record)
-        if is_new:
-            stats["imported"] += 1
+        try:
+            _, is_new = insert_paper(conn, run_id, record)
+            if is_new:
+                stats["imported"] += 1
+        except Exception as exc:
+            conn.rollback()
+            stats["errors"] += 1
+            logger.debug("Insert failed for PMID %s: %s", pmid, exc)
+            return
         if stats["imported"] % 500 == 0 and stats["imported"] > 0:
             logger.info(
                 "Progress: %d imported, %d errors, %d no_xml (total processed: %d)",
@@ -680,11 +686,14 @@ async def run_download_phase(
     await asyncio.gather(*tasks, return_exceptions=True)
 
     # Finish ingest run
-    cur.execute(
-        "UPDATE ingest_runs SET papers_found=%s, papers_new=%s, papers_skipped=%s, status='completed', completed_at=NOW() WHERE id=%s",
-        (stats["total"], stats["imported"], stats["errors"] + stats["no_xml"], run_id),
-    )
-    conn.commit()
+    try:
+        cur.execute(
+            "UPDATE ingest_runs SET papers_found=%s, papers_new=%s, papers_skipped=%s, status='completed', completed_at=NOW() WHERE id=%s",
+            (stats["total"], stats["imported"], stats["errors"] + stats["no_xml"], run_id),
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
     conn.close()
 
     logger.info(
