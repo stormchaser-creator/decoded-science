@@ -60,6 +60,58 @@ function MiniGraph({ paperId, connections }) {
   )
 }
 
+function ConnGroup({ type, items, paperId, isMobile }) {
+  const [expanded, setExpanded] = React.useState(items.length <= 5)
+  const borderColor = EDGE_COLORS[type] || EDGE_COLORS.default
+  const shown = expanded ? items : items.slice(0, 5)
+  return (
+    <div id={`conn-group-${type}`} style={{ ...{ background: '#12121e', borderRadius: '8px', padding: '16px' }, marginBottom: '12px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
+        <div style={{ width: '4px', height: '20px', background: borderColor, borderRadius: '2px' }} />
+        <span style={{ fontSize: '13px', fontWeight: '700', color: borderColor, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+          {type.replace(/_/g, ' ')}
+        </span>
+        <span style={{ fontSize: '11px', color: '#4b4b6b' }}>({items.length})</span>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '10px' }}>
+        {shown.map((c, i) => {
+          const isA = String(c.paper_a_id) === String(paperId)
+          const otherId = isA ? c.paper_b_id : c.paper_a_id
+          const otherTitle = isA ? c.paper_b_title : c.paper_a_title
+          return (
+            <div key={c.id || i} style={{
+              background: '#0e0e1a', borderRadius: '8px', padding: '12px',
+              borderLeft: `3px solid ${borderColor}`,
+            }}>
+              <Link to={`/papers/${otherId}`} style={{ fontSize: '12px', color: '#c4bef8', lineHeight: '1.5', textDecoration: 'none', fontWeight: '500', display: 'block', marginBottom: '6px' }}>
+                {otherTitle || 'Untitled'}
+              </Link>
+              {c.description && (
+                <p style={{ fontSize: '11px', color: '#7a74a8', margin: 0, lineHeight: '1.6' }}>
+                  {c.description.length > 200 ? c.description.substring(0, 200) + '…' : c.description}
+                </p>
+              )}
+              <div style={{ display: 'flex', gap: '10px', marginTop: '6px', fontSize: '10px', color: '#4b4b6b' }}>
+                <span>Conf: {((c.confidence || 0) * 100).toFixed(0)}%</span>
+                {c.novelty_score != null && <span>Novelty: {((c.novelty_score || 0) * 100).toFixed(0)}%</span>}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+      {items.length > 5 && (
+        <button onClick={() => setExpanded(!expanded)} style={{
+          background: 'transparent', border: '1px solid #2d2060', color: '#7c6af7',
+          borderRadius: '6px', padding: '6px 14px', fontSize: '11px', cursor: 'pointer',
+          marginTop: '10px', width: '100%',
+        }}>
+          {expanded ? `Show fewer` : `Show all ${items.length} ${type.replace(/_/g, ' ')} connections`}
+        </button>
+      )}
+    </div>
+  )
+}
+
 function ClaimItem({ claim }) {
   const text = typeof claim === 'string' ? claim : (claim.text || claim.claim || JSON.stringify(claim))
   const strength = typeof claim === 'object' ? claim.evidence_strength : null
@@ -462,57 +514,9 @@ export default function PaperDetailPage() {
             <h2 style={{ fontSize: '16px', fontWeight: '700', color: '#e0e0e8', marginBottom: '16px' }}>
               Connections ({sortedConns.length})
             </h2>
-            {sortedGroups.map(([type, items]) => {
-              const borderColor = EDGE_COLORS[type] || EDGE_COLORS.default
-              const [expanded, setExpanded] = React.useState(items.length <= 5)
-              const shown = expanded ? items : items.slice(0, 5)
-              return (
-                <div key={type} id={`conn-group-${type}`} style={{ ...s.card, marginBottom: '12px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
-                    <div style={{ width: '4px', height: '20px', background: borderColor, borderRadius: '2px' }} />
-                    <span style={{ fontSize: '13px', fontWeight: '700', color: borderColor, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                      {type.replace(/_/g, ' ')}
-                    </span>
-                    <span style={{ fontSize: '11px', color: '#4b4b6b' }}>({items.length})</span>
-                  </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '10px' }}>
-                    {shown.map((c, i) => {
-                      const isA = String(c.paper_a_id) === String(id)
-                      const otherId = isA ? c.paper_b_id : c.paper_a_id
-                      const otherTitle = isA ? c.paper_b_title : c.paper_a_title
-                      return (
-                        <div key={c.id || i} style={{
-                          background: '#0e0e1a', borderRadius: '8px', padding: '12px',
-                          borderLeft: `3px solid ${borderColor}`,
-                        }}>
-                          <Link to={`/papers/${otherId}`} style={{ fontSize: '12px', color: '#c4bef8', lineHeight: '1.5', textDecoration: 'none', fontWeight: '500', display: 'block', marginBottom: '6px' }}>
-                            {otherTitle || 'Untitled'}
-                          </Link>
-                          {c.description && (
-                            <p style={{ fontSize: '11px', color: '#7a74a8', margin: 0, lineHeight: '1.6' }}>
-                              {c.description.length > 200 ? c.description.substring(0, 200) + '…' : c.description}
-                            </p>
-                          )}
-                          <div style={{ display: 'flex', gap: '10px', marginTop: '6px', fontSize: '10px', color: '#4b4b6b' }}>
-                            <span>Conf: {((c.confidence || 0) * 100).toFixed(0)}%</span>
-                            {c.novelty_score != null && <span>Novelty: {((c.novelty_score || 0) * 100).toFixed(0)}%</span>}
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                  {items.length > 5 && (
-                    <button onClick={() => setExpanded(!expanded)} style={{
-                      background: 'transparent', border: '1px solid #2d2060', color: '#7c6af7',
-                      borderRadius: '6px', padding: '6px 14px', fontSize: '11px', cursor: 'pointer',
-                      marginTop: '10px', width: '100%',
-                    }}>
-                      {expanded ? `Show fewer` : `Show all ${items.length} ${type.replace(/_/g, ' ')} connections`}
-                    </button>
-                  )}
-                </div>
-              )
-            })}
+            {sortedGroups.map(([type, items]) => (
+              <ConnGroup key={type} type={type} items={items} paperId={id} isMobile={isMobile} />
+            ))}
           </div>
         )
       })()}
