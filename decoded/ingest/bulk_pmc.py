@@ -116,6 +116,166 @@ AGING_QUERIES = [
     # Circadian & sleep
     '"Circadian Rhythm"[MeSH] AND "Aging"[MeSH]',
     '"Sleep"[MeSH] AND "Aging"[MeSH] AND ("Cognitive Dysfunction"[MeSH] OR "Neurodegeneration"[tiab])',
+
+    # ===================================================================
+    # TIER 1 — Follow the connectome's own topology
+    # Entity/mechanism-centric, not domain-centric
+    # ===================================================================
+
+    # CRP — highest-connectivity inflammatory marker
+    '"C-Reactive Protein"[MeSH]',
+    '"C-Reactive Protein"[MeSH] AND "Inflammation"[MeSH]',
+    '"C-Reactive Protein"[MeSH] AND ("Cardiovascular Diseases"[MeSH] OR "Brain"[MeSH])',
+
+    # IL-6 — central cytokine hub
+    '"Interleukin-6"[MeSH]',
+    '"Interleukin-6"[MeSH] AND ("Aging"[MeSH] OR "Neuroinflammatory Diseases"[MeSH])',
+    '"Interleukin-6"[MeSH] AND ("Depression"[MeSH] OR "Stress, Physiological"[MeSH])',
+
+    # mTOR — master regulator node
+    '"TOR Serine-Threonine Kinases"[MeSH]',
+    '"TOR Serine-Threonine Kinases"[MeSH] AND "Autophagy"[MeSH]',
+    '"TOR Serine-Threonine Kinases"[MeSH] AND ("Neoplasms"[MeSH] OR "Cell Proliferation"[MeSH])',
+
+    # Autophagy — clearance mechanism
+    '"Autophagy"[MeSH]',
+    '"Mitophagy"[tiab]',
+    '"Autophagy"[MeSH] AND "Neurodegeneration"[tiab]',
+    '"Autophagy"[MeSH] AND "Cellular Senescence"[MeSH]',
+
+    # BDNF — neuroplasticity hub
+    '"Brain-Derived Neurotrophic Factor"[MeSH]',
+    '"Brain-Derived Neurotrophic Factor"[MeSH] AND ("Exercise"[MeSH] OR "Neuronal Plasticity"[MeSH])',
+    '"Brain-Derived Neurotrophic Factor"[MeSH] AND ("Depression"[MeSH] OR "Cognition"[MeSH])',
+
+    # TNF-alpha — inflammatory signaling
+    '"Tumor Necrosis Factor-alpha"[MeSH]',
+    '"Tumor Necrosis Factor-alpha"[MeSH] AND "NF-kappa B"[MeSH]',
+    '"Tumor Necrosis Factor-alpha"[MeSH] AND ("Neuroinflammatory Diseases"[MeSH] OR "Apoptosis"[MeSH])',
+
+    # NF-kB — master inflammatory transcription factor
+    '"NF-kappa B"[MeSH]',
+    '"NF-kappa B"[MeSH] AND ("Inflammation"[MeSH] OR "Aging"[MeSH])',
+    '"NF-kappa B"[MeSH] AND "Signal Transduction"[MeSH]',
+
+    # AMPK — energy sensor
+    '"AMP-Activated Protein Kinases"[MeSH]',
+    '"AMP-Activated Protein Kinases"[MeSH] AND ("Mitochondria"[MeSH] OR "Autophagy"[MeSH])',
+    '"AMP-Activated Protein Kinases"[MeSH] AND ("Insulin Resistance"[MeSH] OR "Metabolism"[MeSH])',
+
+    # p53 — tumor suppressor / senescence gatekeeper
+    '"Tumor Suppressor Protein p53"[MeSH]',
+    '"Tumor Suppressor Protein p53"[MeSH] AND ("Cellular Senescence"[MeSH] OR "Apoptosis"[MeSH])',
+    '"Tumor Suppressor Protein p53"[MeSH] AND "Aging"[MeSH]',
+
+    # Telomerase — replicative aging
+    '"Telomerase"[MeSH]',
+    '"Telomerase"[MeSH] AND ("Aging"[MeSH] OR "Cellular Senescence"[MeSH])',
+
+    # Tier 1 — universal cellular mechanisms
+    '"Signal Transduction"[MeSH] AND "Aging"[MeSH]',
+    '"Apoptosis"[MeSH] AND ("Aging"[MeSH] OR "Neurodegeneration"[tiab])',
+    '"Calcium Signaling"[MeSH] AND ("Brain"[MeSH] OR "Aging"[MeSH])',
+    '"Reactive Oxygen Species"[MeSH] AND ("Mitochondria"[MeSH] OR "Aging"[MeSH])',
+    '"Insulin-Like Growth Factor I"[MeSH] AND "Aging"[MeSH]',
+    '"Wnt Signaling Pathway"[MeSH] AND ("Aging"[MeSH] OR "Stem Cells"[MeSH])',
+    '"Notch Signaling Pathway"[tiab] AND ("Aging" OR "Stem Cells")',
+    '"Hedgehog Proteins"[MeSH] AND "Aging"[MeSH]',
+
+    # Tier 1 — cross-tissue boundary signals
+    '"Exosomes"[MeSH]',
+    '"Exosomes"[MeSH] AND ("Aging"[MeSH] OR "Neurodegeneration"[tiab] OR "Biomarkers"[MeSH])',
+    '"Neuropeptides"[MeSH] AND ("Aging"[MeSH] OR "Inflammation"[MeSH])',
+    '"Nitric Oxide"[MeSH] AND ("Endothelium"[MeSH] OR "Brain"[MeSH] OR "Aging"[MeSH])',
+    '"Cytokines"[MeSH] AND "Brain"[MeSH]',
+    '"Extracellular Vesicles"[MeSH] AND ("Aging"[MeSH] OR "Biomarkers"[MeSH])',
+
+    # ===================================================================
+    # TIER 2-5 — Pearl's domain-stratified, mechanism-pure queries
+    # Fill the floor plan before deepening the neuro/immune hole
+    # ===================================================================
+
+    # CARDIOVASCULAR
+    '"Endothelium, Vascular"[MeSH]',
+    '"Vascular Stiffness"[MeSH]',
+    '"Nitric Oxide Synthase"[MeSH]',
+    '"Heart Rate"[MeSH] AND "Autonomic Nervous System"[MeSH]',
+    '"Atherosclerosis"[MeSH] AND "Inflammation"[MeSH]',
+    '"Endothelial Dysfunction"[tiab]',
+    '"Platelet Aggregation"[MeSH]',
+    '"Angiogenesis"[MeSH] AND "Hypoxia"[MeSH]',
+    '"Cardiac Fibrosis"[tiab]',
+    '"Myocardial Remodeling"[MeSH]',
+
+    # METABOLIC / INSULIN AXIS
+    '"Insulin Resistance"[MeSH]',
+    '"Glucose Metabolism Disorders"[MeSH]',
+    '"Adiponectin"[MeSH]',
+    '"Leptin"[MeSH]',
+    '"Peroxisome Proliferator-Activated Receptors"[MeSH]',
+    '"Gluconeogenesis"[MeSH]',
+    '"Fatty Acids"[MeSH] AND "Mitochondria"[MeSH]',
+    '"Glycogen Synthase Kinase 3"[MeSH]',
+    '"Adipose Tissue"[MeSH] AND "Inflammation"[MeSH]',
+    '"Fasting"[MeSH] AND "Metabolism"[MeSH]',
+
+    # GUT / LIVER / DETOX
+    '"Gastrointestinal Microbiome"[MeSH]',
+    '"Intestinal Permeability"[tiab]',
+    '"Bile Acids and Salts"[MeSH]',
+    '"Short Chain Fatty Acids"[MeSH]',
+    '"Mucus"[MeSH] AND "Intestinal Mucosa"[MeSH]',
+    '"Hepatic Stellate Cells"[MeSH]',
+    '"Dysbiosis"[tiab]',
+    '"Gut-Brain Axis"[tiab]',
+    '"Glutathione"[MeSH] AND "Oxidative Stress"[MeSH]',
+    '"Liver"[MeSH] AND "Detoxification, Metabolic"[MeSH]',
+
+    # HPA AXIS / STRESS PHYSIOLOGY
+    '"Hypothalamo-Hypophyseal System"[MeSH]',
+    '"Corticotropin-Releasing Hormone"[MeSH]',
+    '"Glucocorticoids"[MeSH] AND "Inflammation"[MeSH]',
+    '"Stress, Physiological"[MeSH] AND "Adrenal Glands"[MeSH]',
+    '"Allostatic Load"[tiab]',
+    '"Sympathetic Nervous System"[MeSH] AND "Cardiovascular System"[MeSH]',
+    '"Hydrocortisone"[MeSH] AND "Feedback"[tiab]',
+    '"Cortisol"[tiab] AND "Circadian Rhythm"[MeSH]',
+
+    # SLEEP / CIRCADIAN
+    '"Circadian Rhythm"[MeSH]',
+    '"CLOCK Proteins"[MeSH]',
+    '"Melatonin"[MeSH] AND "Mitochondria"[MeSH]',
+    '"Sleep Deprivation"[MeSH] AND "Inflammation"[MeSH]',
+    '"Suprachiasmatic Nucleus"[MeSH]',
+    '"Glymphatic System"[tiab]',
+    '"Chronobiology Disorders"[MeSH]',
+
+    # IMMUNE REGULATION (non-neuro)
+    '"Regulatory T-Lymphocytes"[MeSH]',
+    '"Immune Tolerance"[MeSH]',
+    '"Dendritic Cells"[MeSH] AND "Antigen Presentation"[MeSH]',
+    '"Inflammasomes"[MeSH]',
+    '"Complement System Proteins"[MeSH]',
+    '"Natural Killer Cells"[MeSH]',
+    '"Interleukin-10"[MeSH]',
+    '"Neutrophil Extracellular Traps"[tiab]',
+    '"Mast Cells"[MeSH] AND "Innate Immunity"[MeSH]',
+
+    # MUSCULOSKELETAL / CONNECTIVE TISSUE
+    '"Extracellular Matrix"[MeSH]',
+    '"Collagen"[MeSH] AND "Fibroblasts"[MeSH]',
+    '"Bone Remodeling"[MeSH]',
+    '"Myokines"[tiab]',
+    '"Skeletal Muscle"[MeSH] AND "Mitochondria"[MeSH]',
+    '"Osteocalcin"[MeSH]',
+
+    # REPRODUCTIVE / HORMONAL AXES
+    '"Estrogens"[MeSH] AND "Inflammation"[MeSH]',
+    '"Testosterone"[MeSH] AND "Mitochondria"[MeSH]',
+    '"Thyroid Hormones"[MeSH] AND "Metabolism"[MeSH]',
+    '"Sex Hormone-Binding Globulin"[MeSH]',
+    '"Progesterone"[MeSH] AND "Neuroprotection"[tiab]',
+    '"Follicle Stimulating Hormone"[MeSH]',
 ]
 
 
