@@ -232,11 +232,88 @@ export default function PaperDetailPage() {
               {paper.study_design && <span style={s.tag}>{paper.study_design}</span>}
               {paper.sample_size && <span style={s.tag}>n={paper.sample_size}</span>}
             </div>
-            {paper.abstract && (
-              <p style={{ fontSize: '13px', color: '#a0a0b8', marginTop: '16px', lineHeight: '1.7' }}>
-                {paper.abstract}
-              </p>
-            )}
+            {paper.abstract && (() => {
+              // Try to parse structured abstract sections
+              const sectionLabels = ['Background', 'Introduction', 'Objective', 'Objectives', 'Aim', 'Aims',
+                'Purpose', 'Methods', 'Materials and Methods', 'Study Design', 'Design',
+                'Results', 'Findings', 'Outcomes', 'Conclusion', 'Conclusions', 'Discussion',
+                'Significance', 'Interpretation', 'Context', 'Setting', 'Participants',
+                'Interventions', 'Main Outcome Measures', 'Measurements']
+              const pattern = new RegExp(`(?:^|\\n|\\. )(?=(?:${sectionLabels.join('|')})\\s*:)`, 'gi')
+              const raw = paper.abstract.trim()
+              // Check if abstract has section markers
+              const hasStructure = sectionLabels.some(l => {
+                const re = new RegExp(`(?:^|\\n|\\. )${l}\\s*:`, 'i')
+                return re.test(raw)
+              })
+              if (!hasStructure) {
+                // Plain abstract — just render as paragraph
+                return <p style={{ fontSize: '13px', color: '#a0a0b8', marginTop: '16px', lineHeight: '1.8' }}>{raw}</p>
+              }
+              // Parse into sections
+              const sections = []
+              const splitRe = new RegExp(`((?:${sectionLabels.join('|')})\\s*):`, 'gi')
+              let lastIndex = 0
+              let lastLabel = null
+              let match
+              // Collect preamble if any
+              const firstMatch = splitRe.exec(raw)
+              if (firstMatch && firstMatch.index > 0) {
+                const preamble = raw.substring(0, firstMatch.index).trim()
+                if (preamble) sections.push({ label: null, text: preamble })
+              }
+              if (firstMatch) {
+                lastLabel = firstMatch[1].trim()
+                lastIndex = firstMatch.index + firstMatch[0].length
+              }
+              splitRe.lastIndex = firstMatch ? firstMatch.index + firstMatch[0].length : 0
+              while ((match = splitRe.exec(raw)) !== null) {
+                if (lastLabel) {
+                  sections.push({ label: lastLabel, text: raw.substring(lastIndex, match.index).trim().replace(/\.\s*$/, '.') })
+                }
+                lastLabel = match[1].trim()
+                lastIndex = match.index + match[0].length
+              }
+              if (lastLabel) {
+                sections.push({ label: lastLabel, text: raw.substring(lastIndex).trim() })
+              }
+              if (sections.length === 0) {
+                return <p style={{ fontSize: '13px', color: '#a0a0b8', marginTop: '16px', lineHeight: '1.8' }}>{raw}</p>
+              }
+              const sectionColors = {
+                background: '#60a5fa', introduction: '#60a5fa', context: '#60a5fa',
+                objective: '#c084fc', objectives: '#c084fc', aim: '#c084fc', aims: '#c084fc', purpose: '#c084fc',
+                methods: '#fbbf24', 'materials and methods': '#fbbf24', 'study design': '#fbbf24', design: '#fbbf24',
+                setting: '#fbbf24', participants: '#fbbf24', interventions: '#fbbf24', 'main outcome measures': '#fbbf24',
+                measurements: '#fbbf24',
+                results: '#4ade80', findings: '#4ade80', outcomes: '#4ade80',
+                conclusion: '#f87171', conclusions: '#f87171', discussion: '#f87171',
+                significance: '#f87171', interpretation: '#f87171',
+              }
+              return (
+                <div style={{ marginTop: '16px' }}>
+                  {sections.map((sec, i) => (
+                    <div key={i} style={{ marginBottom: '14px' }}>
+                      {sec.label && (
+                        <div style={{
+                          fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px',
+                          color: sectionColors[sec.label.toLowerCase()] || '#7c6af7', marginBottom: '4px',
+                        }}>
+                          {sec.label}
+                        </div>
+                      )}
+                      <p style={{
+                        fontSize: '13px', color: '#a0a0b8', lineHeight: '1.8', margin: 0,
+                        paddingLeft: sec.label ? '12px' : '0',
+                        borderLeft: sec.label ? `2px solid ${sectionColors[sec.label.toLowerCase()] || '#2d2060'}33` : 'none',
+                      }}>
+                        {sec.text}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )
+            })()}
             {paper.key_findings && (() => {
               let findings = paper.key_findings
               if (typeof findings === 'string') {
@@ -270,17 +347,27 @@ export default function PaperDetailPage() {
               </div>
               {showEntities && (
                 <div style={{ marginTop: '12px', display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                  {entities.map((e, i) => (
-                    <span key={i} style={{
-                      ...s.tag,
-                      borderLeft: `3px solid ${EPISTEMIC.interpretation}`,
-                      marginTop: 0,
-                      color: '#c4bef8',
-                      background: '#140a20',
-                    }}>
-                      {typeof e === 'string' ? e : (e.name || e.text || JSON.stringify(e))}
-                    </span>
-                  ))}
+                  {entities.map((e, i) => {
+                    const name = typeof e === 'string' ? e : (e.name || e.text || JSON.stringify(e))
+                    const conf = typeof e === 'object' ? e.confidence : null
+                    return (
+                      <Link key={i} to={`/papers?q=${encodeURIComponent(name)}`} style={{
+                        ...s.tag,
+                        borderLeft: `3px solid ${EPISTEMIC.interpretation}`,
+                        marginTop: 0,
+                        color: '#c4bef8',
+                        background: '#140a20',
+                        textDecoration: 'none',
+                        cursor: 'pointer',
+                        transition: 'background 0.15s',
+                      }}
+                        onMouseEnter={ev => ev.currentTarget.style.background = '#1e1035'}
+                        onMouseLeave={ev => ev.currentTarget.style.background = '#140a20'}
+                      >
+                        {name}{conf != null && <span style={{ color: '#4b4b6b', marginLeft: '4px', fontSize: '9px' }}>{Math.round(conf * 100)}%</span>}
+                      </Link>
+                    )
+                  })}
                 </div>
               )}
             </div>
