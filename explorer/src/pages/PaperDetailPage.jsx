@@ -88,7 +88,7 @@ function ConnGroup({ type, items, paperId, isMobile }) {
               </Link>
               {c.description && (
                 <p style={{ fontSize: '11px', color: '#7a74a8', margin: 0, lineHeight: '1.6' }}>
-                  {c.description.length > 200 ? c.description.substring(0, 200) + '…' : c.description}
+                  {c.description}
                 </p>
               )}
               <div style={{ display: 'flex', gap: '10px', marginTop: '6px', fontSize: '10px', color: '#4b4b6b' }}>
