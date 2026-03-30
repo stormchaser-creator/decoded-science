@@ -475,9 +475,133 @@ def list_briefs_v1(
     limit: int = Query(20, le=100),
     skip: int = Query(0),
     quality: str | None = Query(None),
+    topic: str | None = Query(None),
+    view: str | None = Query(None),
+    sort: str = Query("methodology"),
 ):
-    """Alias for /critiques — intelligence briefs with full metadata."""
-    return list_critiques(limit=limit, skip=skip, quality=quality)
+    """Smart briefs listing with views, topics, and sorting."""
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+    quality_filter = ""
+    if quality in ("high", "medium", "low"):
+        quality_filter = f"AND pc.overall_quality = '{quality}'"
+
+    topic_filter = ""
+    if topic:
+        topic_filter = "AND %s = ANY(p.topic_tags)"
+
+    view_filter = ""
+    view_join = ""
+    if view == "must-reads":
+        view_filter = "AND pc.overall_quality = 'high'"
+        sort = "novelty"
+    elif view == "controversies":
+        view_join = """JOIN discovered_connections dc_contra
+            ON (dc_contra.paper_a_id = pc.paper_id OR dc_contra.paper_b_id = pc.paper_id)
+            AND dc_contra.connection_type = 'contradicts'"""
+    elif view == "hubs":
+        view_filter = ""
+        sort = "connections"
+    elif view == "recent":
+        sort = "date"
+
+    sort_clause = {
+        "methodology": "pc.methodology_score DESC NULLS LAST",
+        "novelty": "pc.novelty_score DESC NULLS LAST",
+        "connections": "connection_count DESC",
+        "date": "pc.created_at DESC",
+    }.get(sort, "pc.methodology_score DESC NULLS LAST")
+
+    params = []
+    query = f"""
+        SELECT DISTINCT pc.id, pc.paper_id, pc.overall_quality, pc.summary as brief, pc.strengths,
+               pc.weaknesses, pc.red_flags, pc.recommendation,
+               pc.methodology_score, pc.novelty_score, pc.reproducibility_score,
+               pc.statistical_rigor,
+               pc.created_at, p.title as paper_title, p.journal, p.published_date,
+               p.topic_tags, p.data_source,
+               (SELECT COUNT(*) FROM discovered_connections dc
+                WHERE dc.paper_a_id = pc.paper_id OR dc.paper_b_id = pc.paper_id) as connection_count
+        FROM paper_critiques pc
+        JOIN raw_papers p ON p.id = pc.paper_id
+        {view_join}
+        WHERE COALESCE(pc.brief_confidence, '') != 'insufficient'
+        {quality_filter}
+        {topic_filter}
+        {view_filter}
+        ORDER BY {sort_clause}
+        LIMIT %s OFFSET %s
+    """
+    if topic:
+        params = [topic, limit, skip]
+    else:
+        params = [limit, skip]
+
+    cur.execute(query, params)
+    rows = [_jsonify_row(dict(r)) for r in cur.fetchall()]
+
+    # Count
+    count_query = f"""
+        SELECT COUNT(DISTINCT pc.id) as n FROM paper_critiques pc
+        JOIN raw_papers p ON p.id = pc.paper_id
+        {view_join}
+        WHERE COALESCE(pc.brief_confidence, '') != 'insufficient'
+        {quality_filter} {topic_filter} {view_filter}
+    """
+    cur.execute(count_query, [topic] if topic else [])
+    total = cur.fetchone()["n"]
+
+    release_db(conn)
+    return {"critiques": rows, "total": total, "count": len(rows)}
+
+
+@app.get("/v1/briefs/topics")
+def list_brief_topics():
+    """List all topics with brief counts."""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT unnest(p.topic_tags) as topic, COUNT(DISTINCT pc.id) as brief_count
+        FROM raw_papers p
+        JOIN paper_critiques pc ON pc.paper_id = p.id
+        WHERE COALESCE(pc.brief_confidence, '') != 'insufficient'
+          AND p.topic_tags != '{}'
+        GROUP BY topic ORDER BY brief_count DESC
+    """)
+    topics = [{"topic": row[0], "count": row[1]} for row in cur.fetchall()]
+    release_db(conn)
+    return {"topics": topics}
+
+
+@app.get("/v1/briefs/clusters")
+def list_convergence_clusters(limit: int = Query(10)):
+    """Find convergence clusters — groups of papers reaching similar conclusions."""
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    # Find papers with the most convergent_evidence connections
+    cur.execute("""
+        WITH conv_counts AS (
+            SELECT paper_id, COUNT(*) as conv_count
+            FROM (
+                SELECT paper_a_id as paper_id FROM discovered_connections WHERE connection_type = 'convergent_evidence'
+                UNION ALL
+                SELECT paper_b_id FROM discovered_connections WHERE connection_type = 'convergent_evidence'
+            ) t
+            GROUP BY paper_id HAVING COUNT(*) >= 3
+        )
+        SELECT p.id, p.title, p.journal, p.published_date, p.topic_tags,
+               cc.conv_count,
+               pc.overall_quality, pc.summary as brief, pc.novelty_score, pc.methodology_score
+        FROM conv_counts cc
+        JOIN raw_papers p ON p.id = cc.paper_id
+        LEFT JOIN paper_critiques pc ON pc.paper_id = p.id AND COALESCE(pc.brief_confidence, '') != 'insufficient'
+        ORDER BY cc.conv_count DESC
+        LIMIT %s
+    """, (limit,))
+    rows = [_jsonify_row(dict(r)) for r in cur.fetchall()]
+    release_db(conn)
+    return {"clusters": rows}
 
 
 @app.get("/papers/{paper_id}/entities")
