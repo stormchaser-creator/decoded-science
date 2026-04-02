@@ -24,6 +24,7 @@ dependencies = [
     "uvicorn[standard]",
     "openai",
     "psycopg2-binary",
+    "pubmed-tools @ file:///Users/whit/Projects/shared-libs/pubmed-tools",
 ]
 
 [project.optional-dependencies]
