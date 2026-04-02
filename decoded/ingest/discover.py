@@ -206,3 +206,111 @@ class PMCDiscoverer:
         # Delegate XML parsing to shared pubmed_tools
         articles = parse_pubmed_xml(xml_text)
         return [_article_to_dict(a) for a in articles]
+
+
+# ---------------------------------------------------------------------------
+# Standalone XML helpers used by bulk_pmc.py
+# ---------------------------------------------------------------------------
+
+def _el_text(el: ET.Element | None) -> str | None:
+    """Get all text from element including tails of children."""
+    if el is None:
+        return None
+    return "".join(el.itertext()).strip() or None
+
+
+def _month_to_num(month: str) -> str:
+    months = {
+        "jan": "01", "feb": "02", "mar": "03", "apr": "04",
+        "may": "05", "jun": "06", "jul": "07", "aug": "08",
+        "sep": "09", "oct": "10", "nov": "11", "dec": "12",
+    }
+    if month.isdigit():
+        return month.zfill(2)
+    return months.get(month[:3].lower(), "01")
+
+
+def _extract_pub_date(article: ET.Element) -> str | None:
+    """Extract publication date as ISO string."""
+    for path in [
+        ".//PubDate",
+        ".//ArticleDate",
+        ".//DateCompleted",
+        ".//DateRevised",
+    ]:
+        date_el = article.find(path)
+        if date_el is not None:
+            year = date_el.findtext("Year")
+            month = date_el.findtext("Month") or "01"
+            day = date_el.findtext("Day") or "01"
+            if year:
+                month = _month_to_num(month)
+                return f"{year}-{month}-{day}"
+    return None
+
+
+def _parse_pubmed_xml(xml_text: str) -> list[dict]:
+    """Parse PubMed efetch XML into list of metadata dicts."""
+    root = ET.fromstring(xml_text)
+    records = []
+
+    for article in root.findall(".//PubmedArticle"):
+        rec: dict = {}
+
+        pmid_el = article.find(".//PMID")
+        rec["pmid"] = pmid_el.text if pmid_el is not None else ""
+
+        title_el = article.find(".//ArticleTitle")
+        rec["title"] = _el_text(title_el) or ""
+
+        abstract_texts = article.findall(".//AbstractText")
+        if abstract_texts:
+            parts = []
+            for el in abstract_texts:
+                label = el.get("Label", "")
+                text = _el_text(el) or ""
+                if label:
+                    parts.append(f"{label}: {text}")
+                else:
+                    parts.append(text)
+            rec["abstract"] = " ".join(parts)
+        else:
+            rec["abstract"] = None
+
+        authors = []
+        for author in article.findall(".//AuthorList/Author"):
+            last = author.findtext("LastName", "")
+            first = author.findtext("ForeName", "") or author.findtext("Initials", "")
+            name = f"{last}, {first}".strip(", ")
+            if name:
+                authors.append(name)
+        rec["authors"] = authors
+
+        journal_el = article.find(".//Journal/Title")
+        if journal_el is None:
+            journal_el = article.find(".//MedlineJournalInfo/MedlineTA")
+        rec["journal"] = journal_el.text if journal_el is not None else None
+
+        rec["pub_date"] = _extract_pub_date(article)
+
+        doi = None
+        for id_el in article.findall(".//ArticleIdList/ArticleId"):
+            if id_el.get("IdType") == "doi":
+                doi = id_el.text
+                break
+        rec["doi"] = doi
+
+        mesh = [
+            el.findtext("DescriptorName", "")
+            for el in article.findall(".//MeshHeadingList/MeshHeading")
+        ]
+        rec["mesh_terms"] = [m for m in mesh if m]
+
+        keywords = [
+            el.text for el in article.findall(".//KeywordList/Keyword") if el.text
+        ]
+        rec["keywords"] = keywords
+
+        records.append(rec)
+
+    return records

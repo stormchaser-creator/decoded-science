@@ -499,7 +499,8 @@ async def collect_aging_pmids(api_key: str | None = None, max_per_query: int = 1
 
 async def fetch_pubmed_metadata(pmids: list[str], api_key: str | None = None) -> dict[str, dict]:
     """Fetch PubMed metadata (title, abstract, authors, etc.) for a list of PMIDs."""
-    from decoded.ingest.discover import _parse_pubmed_xml
+    import dataclasses
+    from pubmed_tools import parse_pubmed_xml
 
     metadata: dict[str, dict] = {}
     chunk_size = 200
@@ -519,10 +520,10 @@ async def fetch_pubmed_metadata(pmids: list[str], api_key: str | None = None) ->
             try:
                 resp = await client.get(EFETCH_URL, params=params)
                 resp.raise_for_status()
-                records = _parse_pubmed_xml(resp.text)
-                for rec in records:
-                    if rec.get("pmid"):
-                        metadata[rec["pmid"]] = rec
+                articles = parse_pubmed_xml(resp.text)
+                for article in articles:
+                    if article.pmid:
+                        metadata[article.pmid] = dataclasses.asdict(article)
             except Exception as exc:
                 logger.warning("efetch failed for chunk %d: %s", i, exc)
             await asyncio.sleep(delay)
