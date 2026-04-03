@@ -41,6 +41,7 @@ if str(_AUTOAIBIZ_PATH) not in sys.path:
     sys.path.insert(0, str(_AUTOAIBIZ_PATH))
 
 from decoded.outreach.email_extractor import enrich_paper_contacts
+from decoded.outreach.gmail_drafts import GmailDraftCreator
 
 logging.basicConfig(
     level=logging.INFO,
@@ -101,6 +102,18 @@ def mark_drafted(
         WHERE id = %s
         """,
         (to_name, to_email, subject, body, cost_usd, outreach_id),
+    )
+    conn.commit()
+
+
+def mark_gmail_draft_created(conn, outreach_id: int) -> None:
+    conn.cursor().execute(
+        """
+        UPDATE reach_paper_outreach
+        SET status = 'gmail_draft_created'
+        WHERE id = %s
+        """,
+        (outreach_id,),
     )
     conn.commit()
 
@@ -207,6 +220,7 @@ class OutreachProcessor:
     def __init__(self, dry_run: bool = False) -> None:
         self.dry_run = dry_run
         self._generator = self._load_generator()
+        self._gmail = self._load_gmail_creator()
 
     def _load_generator(self):
         try:
@@ -219,6 +233,21 @@ class OutreachProcessor:
                 exc,
             )
             raise
+
+    def _load_gmail_creator(self) -> GmailDraftCreator | None:
+        if not GmailDraftCreator.is_configured():
+            logger.info(
+                "GMAIL_APP_PASSWORD not set — Gmail draft creation disabled. "
+                "Set it in .env to enable autonomous draft creation."
+            )
+            return None
+        try:
+            creator = GmailDraftCreator()
+            logger.info("Gmail draft creation enabled (from=%s)", creator.from_email)
+            return creator
+        except Exception as exc:
+            logger.warning("Gmail draft creator unavailable: %s", exc)
+            return None
 
     def process_pending(self, limit: int = 10) -> dict[str, int]:
         stats = {"processed": 0, "drafted": 0, "skipped": 0, "failed": 0}
@@ -343,6 +372,27 @@ class OutreachProcessor:
             result["to_email"],
             result["cost_usd"],
         )
+
+        # Autonomously create Gmail draft if credentials are available
+        if self._gmail is not None:
+            try:
+                self._gmail.create_draft(
+                    to_name=result["to_name"],
+                    to_email=result["to_email"],
+                    subject=result["subject"],
+                    body=result["body"],
+                    outreach_id=outreach_id,
+                )
+                mark_gmail_draft_created(conn, outreach_id)
+                logger.info("Gmail draft created for outreach item %d", outreach_id)
+            except Exception as exc:
+                # Non-fatal: leave as 'drafted' so the backfill script can retry
+                logger.warning(
+                    "Gmail draft creation failed for item %d: %s — left as 'drafted' for retry",
+                    outreach_id,
+                    exc,
+                )
+
         return "drafted"
 
 

@@ -120,6 +120,8 @@ Both Decoded and Pearl import from this shared lib.
 - `DATABASE_URL` — `postgresql://whit@localhost:5432/encoded_human`
 - `NEO4J_URI` — `bolt://localhost:7687`
 - `REDIS_URL` — `redis://localhost:6379/0`
+- `GMAIL_FROM_EMAIL` — `Drericwhitney@gmail.com` (outreach sender address)
+- `GMAIL_APP_PASSWORD` — 16-char Google app password for IMAP draft creation (generate at https://myaccount.google.com/apppasswords — requires 2-Step Verification)
 
 ---
 
@@ -186,7 +188,7 @@ cd /Users/whit/Projects/Decoded && source .venv/bin/activate && python decoded/i
 - **Neo4j OOM (decoded-connect):** `find_convergent_claims` and `find_shared_mechanisms` hitting 4.2GB transaction memory limit. Not crashing but degraded — getting fewer candidates. `dbms.memory.transaction.total.max` in Neo4j config may need tuning upward.
 - **decoded-graph psycopg2 timeout:** Occasional connection timeout after long sessions. Needs keepalive/reconnect guard in the graph worker.
 - **Pearl bridge (`decoded/pearl/`):** NOT BUILT. Architecture decided: batch cron job reads `raw_papers`, converts claims to `kb_entries` format, Pearl overrides on classification confidence. 27 Altini papers are the first target batch.
-- **Outreach pipeline:** `decoded-outreach` running (cron hourly). Pending: Gmail MCP connector to create drafts from `drafted` items. See Author Outreach System section.
+- **Outreach pipeline:** `decoded-outreach` running (cron hourly). Autonomous Gmail draft creation via IMAP is implemented (`decoded/outreach/gmail_drafts.py`). **Pending:** Add `GMAIL_APP_PASSWORD` to `.env` (generate at https://myaccount.google.com/apppasswords). Once set, the full pipeline runs end-to-end without human involvement until Eric hits Send.
 - **Connection coverage:** 13,512 connections out of 17,278 extracted papers = ~78% coverage. Some papers have no connections yet.
 - **Explorer frontend:** Served via `vite preview` (not production build). For production, should be built and served via nginx.
 - **Neo4j OOM:** Heavy graph queries (large connectome traversals) cause Neo4j out-of-memory. Avoid deep traversals without LIMIT clauses.
@@ -196,19 +198,26 @@ cd /Users/whit/Projects/Decoded && source .venv/bin/activate && python decoded/i
 
 ## Author Outreach System
 
-When `decoded-connect` discovers a connection with confidence ≥ 0.70, it automatically queues the connection for author outreach. The flow:
+When `decoded-connect` discovers a connection with confidence ≥ 0.70, it automatically queues the connection for author outreach. The flow is **fully autonomous** — no human needed until Eric hits Send:
 
 ```
 decoded-connect stores connection (confidence ≥ 0.70)
   → INSERT into reach_paper_outreach (status=pending_draft)
   → decoded-outreach processor runs hourly
   → fetches paper details + author email from encoded_human DB
+  → cooldown + unsubscribe checks
   → PaperOutreachGenerator (AutoAIBiz reach agent) generates 5-part email
-  → status=drafted
-  → Eric reviews via GET /api/outreach/drafts
-  → Gmail MCP connector creates Gmail draft
-  → Eric sends from Drericwhitney@gmail.com
+  → mark_drafted() → status=drafted
+  → GmailDraftCreator (IMAP APPEND to [Gmail]/Drafts on Drericwhitney@gmail.com)
+  → mark_gmail_draft_created() → status=gmail_draft_created
+  → Eric reviews draft in Gmail, hits Send
 ```
+
+**Gmail draft creation** uses IMAP APPEND via `decoded/outreach/gmail_drafts.py`:
+- Requires `GMAIL_APP_PASSWORD` in `.env` (16-char app password, not Gmail password)
+- If `GMAIL_APP_PASSWORD` is not set, processor stops at `status=drafted` (graceful degradation)
+- Failed Gmail creation is non-fatal — item stays `drafted` and can be retried via `scripts/create_gmail_drafts.py`
+- Backfill existing `drafted` items: `python scripts/create_gmail_drafts.py`
 
 ### Sender Identity
 - **From:** Dr. Eric Whitney, DO (Doctor of Osteopathic Medicine — NEVER "MD")
@@ -224,8 +233,10 @@ decoded-connect stores connection (confidence ≥ 0.70)
 
 ### Key Files
 - `decoded/connect/worker.py` — `enqueue_paper_outreach()` triggers after storing connection
-- `decoded/outreach/processor.py` — `decoded-outreach` PM2 process; processes pending items
+- `decoded/outreach/processor.py` — `decoded-outreach` PM2 process; processes pending items through to `gmail_draft_created`
+- `decoded/outreach/gmail_drafts.py` — `GmailDraftCreator`: IMAP APPEND to `[Gmail]/Drafts`
 - `decoded/outreach/templates.py` — Backup/static template (5-part structure preserved)
+- `scripts/create_gmail_drafts.py` — Standalone backfill: create Gmail drafts for all `drafted` items
 - `AutoAIBiz/agents/reach/src/paper_outreach_generator.py` — LLM email generator
 - `AutoAIBiz/agents/reach/src/prompts/paper_outreach_email.txt` — Prompt template
 - `AutoAIBiz/agents/reach/migrations/003_paper_outreach.sql` — DB schema
