@@ -2419,6 +2419,44 @@ def outreach_mark_gmail_draft(outreach_id: int, gmail_draft_id: str = Body(embed
     return {"status": "gmail_draft_created", "id": outreach_id, "gmail_draft_id": gmail_draft_id}
 
 
+@app.get("/api/outreach/gmail-ready")
+def outreach_gmail_ready(limit: int = Query(default=50, le=200)):
+    """List drafted items ready for Gmail draft creation via the Cowork Gmail MCP.
+
+    Used when OUTREACH_GMAIL_METHOD=api in .env — the Cowork agent polls this
+    endpoint, creates Gmail drafts in stormchaser@elryx.com, then calls
+    POST /api/outreach/gmail-draft/{id} to mark each one created.
+
+    Returns items in 'drafted' status with full email details.
+    """
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute(
+        """
+        SELECT o.id, o.to_name, o.to_email, o.subject, o.body,
+               o.connection_id::text, o.confidence, o.drafted_at,
+               pa.title AS paper_a_title, pb.title AS paper_b_title
+        FROM reach_paper_outreach o
+        LEFT JOIN raw_papers pa ON pa.id = o.paper_a_id
+        LEFT JOIN raw_papers pb ON pb.id = o.paper_b_id
+        WHERE o.status = 'drafted'
+          AND o.to_email IS NOT NULL
+          AND o.body IS NOT NULL
+        ORDER BY o.drafted_at ASC
+        LIMIT %s
+        """,
+        (limit,),
+    )
+    rows = [dict(r) for r in cur.fetchall()]
+    release_db(conn)
+    gmail_method = os.environ.get("OUTREACH_GMAIL_METHOD", "imap")
+    return {
+        "gmail_method": gmail_method,
+        "count": len(rows),
+        "items": rows,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------

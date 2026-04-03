@@ -225,10 +225,16 @@ decoded-connect stores connection (confidence ≥ 0.70)
 ### Key Files
 - `decoded/connect/worker.py` — `enqueue_paper_outreach()` triggers after storing connection
 - `decoded/outreach/processor.py` — `decoded-outreach` PM2 process; processes pending items
-- `decoded/outreach/templates.py` — Backup/static template (5-part structure preserved)
-- `AutoAIBiz/agents/reach/src/paper_outreach_generator.py` — LLM email generator
-- `AutoAIBiz/agents/reach/src/prompts/paper_outreach_email.txt` — Prompt template
+- `decoded/outreach/templates.py` — LLM email generator (EmailTemplateGenerator) + static fallback
+- `decoded/outreach/OUTREACH_VOICE.md` — **APPROVED VOICE REFERENCE** (2026-04-03). Eric reviewed the first email (Capanoglu/antinutrients) and called it "strong, very well written, perfect on tone." All outreach email generation must match this voice.
+- `AutoAIBiz/agents/reach/src/paper_outreach_generator.py` — LLM email generator (AutoAIBiz reach agent)
+- `AutoAIBiz/agents/reach/src/prompts/paper_outreach_email.txt` — Prompt template (aligned with approved voice)
+- `AutoAIBiz/agents/reach/src/prompts/OUTREACH_VOICE.md` — Mirror of voice reference
 - `AutoAIBiz/agents/reach/migrations/003_paper_outreach.sql` — DB schema
+
+### Gmail Methods
+- `OUTREACH_GMAIL_METHOD=imap` (default) — creates drafts via IMAP directly to Drericwhitney@gmail.com
+- `OUTREACH_GMAIL_METHOD=api` — exposes `GET /api/outreach/gmail-ready` for Cowork Gmail MCP (stormchaser@elryx.com) to pick up and create drafts
 
 ### Database Tables (encoded_human PostgreSQL)
 - `reach_paper_outreach` — main queue (connection_id UNIQUE, status flow: pending_draft → drafted → gmail_draft_created → sent)
@@ -238,6 +244,7 @@ decoded-connect stores connection (confidence ≥ 0.70)
 ### API Endpoints
 - `GET /api/outreach/pending` — pending + drafted items with paper titles
 - `GET /api/outreach/drafts` — drafted items ready for Gmail (includes full body)
+- `GET /api/outreach/gmail-ready` — drafted items for Cowork Gmail MCP pickup (OUTREACH_GMAIL_METHOD=api)
 - `GET /api/outreach/stats` — queue counts by status + total LLM cost
 - `POST /api/outreach/skip/{id}` — mark item skipped
 - `POST /api/outreach/gmail-draft/{id}` — mark Gmail draft created (called by MCP connector)

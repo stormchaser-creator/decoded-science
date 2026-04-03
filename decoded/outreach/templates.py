@@ -167,9 +167,11 @@ class EmailTemplateGenerator:
 
         return f"""You are writing a personalized outreach email on behalf of Dr. Eric Whitney, DO — a board-certified neurosurgeon and researcher who runs The Decoded Human, a literature connectome that uses AI to map connections across biomedical research.
 
-SENDER: {sender_name} (DO — Doctor of Osteopathic Medicine, NOT MD)
+SENDER: {sender_name} (DO — Doctor of Osteopathic Medicine, NEVER "MD")
 SENDER EMAIL: {SENDER_EMAIL}
 SITE: {SITE_URL}
+
+VOICE REFERENCE: The approved gold-standard email is the one sent to Esra Capanoglu (re: antinutrients / Fanconi anemia aging hallmarks) — Eric called it "strong, very well written, perfect on tone." Match that voice exactly. Key qualities: specific rather than generic, honest about AI, clinically grounded, warm but not flattering, intellectually curious.
 
 RECIPIENT FIRST NAME: {first_name}
 
@@ -186,42 +188,55 @@ CONNECTION PHRASE: {conn_type_phrase}
 CONNECTION DESCRIPTION: {conn_description}
 AI CONFIDENCE: {confidence_pct:.0%}
 
-REQUIRED EMAIL STRUCTURE — follow this exact five-part flow:
+REQUIRED FIVE-PART EMAIL STRUCTURE:
 
 1. THANKFUL — Open with genuine, specific gratitude for their research contribution.
-   Express real appreciation for what they discovered or demonstrated, referencing specifics.
-   Disclose AI in this first paragraph: mention that The Decoded Human uses AI to map
-   connections across the literature, and that's how this email came to be written.
+   Reference something specific from their paper (a specific finding, argument, framing,
+   or methodological approach — not just the topic). Disclose AI in this first paragraph:
+   mention that The Decoded Human uses AI to map connections across the literature, and
+   that's how this email came to be written.
 
-2. IMPACT — Show where their work is making an impact. Describe how their paper's
-   findings fit into the broader research landscape and what it means for the field.
-   Be specific to their actual findings, not generic.
+2. IMPACT — Show where their work is making an impact. Describe how their specific
+   findings fit into the broader research landscape. Be concrete about what their paper
+   uniquely adds. Show you actually understood their contribution — no generic praise.
 
-3. WHY IT MATTERS — Explain the bigger-picture significance of their contribution.
-   Why does this work matter for patients, for the field, for our understanding of biology?
-   Make this feel like a neurosurgeon-researcher peer recognizing their work.
+3. WHY IT MATTERS — Explain the bigger-picture significance. Connect their work to
+   patient outcomes, clinical translation, or fundamental biological understanding.
+   Speak as a neurosurgeon-researcher who sees why this matters. Grounded — no hype.
 
-4. THE CONNECTION — Present the specific discovered connection between their paper
-   and "{connected_title}". Be clear, logical, and specific. State the connection type
-   ({conn_type_phrase}) and what exactly the connection is.
-   Include the link: {SITE_URL}/connections (where this connection is visualized).
+4. THE CONNECTION — Present the specific AI-discovered connection between their paper
+   and "{connected_title}". State the connection type ({conn_type_phrase}) and what
+   exactly the connection is, in plain language. Include the link: {SITE_URL}/connections.
+   Be intellectually honest: state the confidence level ({confidence_pct:.0%}) and
+   explicitly note this is an AI-generated observation, not a peer-reviewed finding.
 
-5. WHY IT'S IMPORTANT — Explain why this specific connection matters for advancing
-   understanding. What could it mean for future research? What questions does it open?
-   Close with a soft, genuine CTA: "I'd love to hear your thoughts on this."
+5. WHY IT'S IMPORTANT — Explain what this connection could mean for future research.
+   What questions does it open that weren't visible before? Close with:
+   "I'd love to hear your thoughts on this." — genuine curiosity, not a request.
 
-TONE REQUIREMENTS:
-- Warm, collegial, researcher-to-researcher — not marketing
-- Genuine scientific curiosity, not flattery
-- Concise: 3–4 short paragraphs, under 300 words total
-- Do NOT ask for anything in the first email beyond their thoughts
-- Include unsubscribe note at the very bottom (single line)
+ABSOLUTE REQUIREMENTS:
+- Warm, collegial, researcher-to-researcher tone — not marketing
+- Under 300 words total (body only, excluding sign-off and footer)
+- Every compliment must reference specifics from their actual paper
+- No marketing language, no asks, no collaboration requests in first email
+- DO NOT say "game-changing", "revolutionary", "groundbreaking", "paradigm shift"
+- Confidence level must be stated explicitly in paragraph 4
+
+SIGN-OFF (use exactly):
+Warm regards,
+Dr. Eric Whitney, DO
+drericwhitney@gmail.com
+{SITE_URL}
+
+FOOTER (include exactly, after blank line and ---):
+---
+To unsubscribe from future research notes, reply with "unsubscribe" in the subject.
 
 FORMAT YOUR RESPONSE EXACTLY AS:
-SUBJECT: [subject line — specific, not generic]
+SUBJECT: [subject line — specific to this paper and connection, not generic]
 
 BODY:
-[email body following the five-part structure above]"""
+[email body following the five-part structure above, including sign-off and footer]"""
 
     def _parse_email(self, raw: str) -> tuple[str, str]:
         """Parse subject and body from the LLM response."""
