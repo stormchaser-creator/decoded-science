@@ -303,6 +303,7 @@ class OutreachProcessor:
         if not connection:
             # Fall back to item-level fields
             connection = {
+                "id": item["connection_id"],
                 "connection_type": item.get("connection_type", "convergent_evidence"),
                 "description": "",
                 "confidence": item.get("confidence", 0.7),

@@ -164,6 +164,8 @@ class EmailTemplateGenerator:
         confidence_pct = connection.get("confidence", 0)
         conn_description = connection.get("description", "")
         conn_type = connection.get("connection_type", "convergent_evidence")
+        connection_id = connection.get("id", "")
+        connection_deep_link = f"{SITE_URL}/connections?c={connection_id}" if connection_id else f"{SITE_URL}/connections"
 
         return f"""You are writing a personalized outreach email on behalf of Dr. Eric Whitney, DO — a board-certified neurosurgeon and researcher who runs The Decoded Human, a literature connectome that uses AI to map connections across biomedical research.
 
@@ -206,7 +208,8 @@ REQUIRED FIVE-PART EMAIL STRUCTURE:
 
 4. THE CONNECTION — Present the specific AI-discovered connection between their paper
    and "{connected_title}". State the connection type ({conn_type_phrase}) and what
-   exactly the connection is, in plain language. Include the link: {SITE_URL}/connections.
+   exactly the connection is, in plain language. Include this exact deep link:
+   {connection_deep_link} — it goes directly to this specific connection.
    Be intellectually honest: state the confidence level ({confidence_pct:.0%}) and
    explicitly note this is an AI-generated observation, not a peer-reviewed finding.
 
@@ -293,7 +296,7 @@ Your work makes a meaningful contribution to this area of research. The findings
 
 In the broader context, work like yours matters because it provides the kind of grounded evidence the field needs to move forward. We've indexed thousands of papers, and yours stands out for the specificity of its contribution.
 
-What's particularly interesting: our system discovered that your paper {conn_phrase} "{connected_title}". {conn_description} You can see this connection visualized at {SITE_URL}/connections.
+What's particularly interesting: our system discovered that your paper {conn_phrase} "{connected_title}". {conn_description} You can see this specific connection visualized at {SITE_URL}/connections?c={connection.get('id', '')}.
 
 This connection could be significant for future research directions in this area. I'd love to hear your thoughts on whether this resonates with your own sense of where the field is heading.
 

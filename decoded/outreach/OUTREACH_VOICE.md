@@ -35,7 +35,7 @@ Connect their findings to patients, clinical translation, or fundamental biologi
 ### 4. THE CONNECTION
 Present the specific AI-discovered connection. Name the connected paper. State the connection type clearly. Be intellectually honest about what this is: an AI observation at a stated confidence level, not a peer-reviewed finding. Include the link to thedecodedhuman.com/connections.
 
-> **What good looks like:** "The AI flagged a convergence worth sharing: your paper shares four conceptual nodes — autophagy, cancer, cellular senescence, and related mechanisms — with *'The tight bond between Fanconi anemia and aging,'* which maps how FA recapitulates primary aging hallmarks including genomic instability and dysregulated autophagy. You can see how these papers connect here: https://thedecodedhuman.com/connections. To be transparent, this is an AI-generated observation at 70% confidence, not a peer-reviewed finding."
+> **What good looks like:** "The AI flagged a convergence worth sharing: your paper shares four conceptual nodes — autophagy, cancer, cellular senescence, and related mechanisms — with *'The tight bond between Fanconi anemia and aging,'* which maps how FA recapitulates primary aging hallmarks including genomic instability and dysregulated autophagy. You can see how these papers connect here: https://thedecodedhuman.com/connections?c={connection_id}. To be transparent, this is an AI-generated observation at 70% confidence, not a peer-reviewed finding."
 
 ### 5. WHY IT'S IMPORTANT (+ Soft CTA)
 Explain what this connection could mean for future research. What questions does it open? Close with a genuine, soft call-to-action: "I'd love to hear your thoughts on this." Not a sales pitch, not a request — genuine scientific curiosity.
@@ -100,7 +100,7 @@ Your work adds something the field genuinely needed: a systematic framework for 
 
 As a neurosurgeon who follows aging biology closely, what strikes me is how your findings on autophagy and cellular senescence as potential mediators of antinutrient benefits plug directly into ongoing debates about dietary modulation of the aging process — not abstractly, but with real implications for how we counsel patients about long-term diet.
 
-The AI flagged a convergence worth sharing: your paper shares four conceptual nodes — autophagy, cancer, cellular senescence, and related mechanisms — with *"The tight bond between Fanconi anemia and aging,"* which maps how FA recapitulates primary aging hallmarks including genomic instability and dysregulated autophagy. You can see how these papers connect here: https://thedecodedhuman.com/connections. To be transparent, this is an AI-generated observation at 70% confidence, not a peer-reviewed finding.
+The AI flagged a convergence worth sharing: your paper shares four conceptual nodes — autophagy, cancer, cellular senescence, and related mechanisms — with *"The tight bond between Fanconi anemia and aging,"* which maps how FA recapitulates primary aging hallmarks including genomic instability and dysregulated autophagy. You can see how these papers connect here: https://thedecodedhuman.com/connections?c={connection_id}. To be transparent, this is an AI-generated observation at 70% confidence, not a peer-reviewed finding.
 
 What I find genuinely interesting: if dietary antinutrients modulate autophagy and senescence, could they intersect with the same pathways that accelerate aging in FA? That question wasn't visible before this mapping.
 
@@ -122,7 +122,7 @@ Every email must have:
 - [ ] AI disclosure in paragraph 1
 - [ ] Specific reference to their paper's actual contribution (not paraphrase of title)
 - [ ] Connection stated with confidence percentage
-- [ ] Link to https://thedecodedhuman.com/connections
+- [ ] Deep link to https://thedecodedhuman.com/connections?c={connection_id} (not the generic /connections URL)
 - [ ] "I'd love to hear your thoughts on this" (or close equivalent)
 - [ ] Sign-off as "Dr. Eric Whitney, DO" (never MD)
 - [ ] Unsubscribe footer (exact wording above)
