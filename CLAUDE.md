@@ -63,7 +63,7 @@ Both Decoded and Pearl import from this shared lib.
 
 | Table | Count |
 |-------|-------|
-| raw_papers | 60,588+ |
+| raw_papers | 188,924 |
 | paper_extractions | 17,278 |
 | paper_connections | 13,512 |
 | intelligence_briefs | 830 |
@@ -175,6 +175,8 @@ cd /Users/whit/Projects/Decoded && source .venv/bin/activate && python decoded/i
 
 ## Known Issues / Pending
 
+- **Neo4j OOM (decoded-connect):** `find_convergent_claims` and `find_shared_mechanisms` hitting 4.2GB transaction memory limit. Not crashing but degraded — getting fewer candidates. `dbms.memory.transaction.total.max` in Neo4j config may need tuning upward.
+- **decoded-graph psycopg2 timeout:** Occasional connection timeout after long sessions. Needs keepalive/reconnect guard in the graph worker.
 - **Pearl bridge (`decoded/pearl/`):** NOT BUILT. Architecture decided: batch cron job reads `raw_papers`, converts claims to `kb_entries` format, Pearl overrides on classification confidence. 27 Altini papers are the first target batch.
 - **Outreach pipeline:** `decoded/outreach/` directory exists but not wired to any publishing target.
 - **Connection coverage:** 13,512 connections out of 17,278 extracted papers = ~78% coverage. Some papers have no connections yet.
