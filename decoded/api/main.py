@@ -2340,6 +2340,50 @@ def outreach_drafts(limit: int = Query(default=50, le=200)):
     return {"items": rows, "count": len(rows)}
 
 
+@app.get("/api/outreach/gmail-ready")
+def outreach_gmail_ready(limit: int = Query(default=50, le=200)):
+    """Return drafted emails in Gmail-ready format (to, subject, body only).
+
+    One entry per unique to_email — deduplicates so you don't spam the same
+    author with multiple drafts. Picks the highest-confidence connection per author.
+    """
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute(
+        """
+        SELECT DISTINCT ON (o.to_email)
+            o.id, o.to_name, o.to_email, o.subject, o.body,
+            o.connection_type, o.confidence,
+            pa.title AS paper_a_title,
+            pb.title AS paper_b_title
+        FROM reach_paper_outreach o
+        LEFT JOIN raw_papers pa ON pa.id = o.paper_a_id
+        LEFT JOIN raw_papers pb ON pb.id = o.paper_b_id
+        WHERE o.status = 'drafted'
+          AND o.to_email IS NOT NULL
+        ORDER BY o.to_email, o.confidence DESC, o.drafted_at DESC
+        LIMIT %s
+        """,
+        (limit,),
+    )
+    items = []
+    for r in cur.fetchall():
+        items.append({
+            "id": r["id"],
+            "to": f"{r['to_name']} <{r['to_email']}>",
+            "to_name": r["to_name"],
+            "to_email": r["to_email"],
+            "subject": r["subject"],
+            "body": r["body"],
+            "paper_a_title": r["paper_a_title"],
+            "paper_b_title": r["paper_b_title"],
+            "connection_type": r["connection_type"],
+            "confidence": r["confidence"],
+        })
+    release_db(conn)
+    return {"items": items, "count": len(items)}
+
+
 @app.get("/api/outreach/stats")
 def outreach_stats():
     """Outreach queue statistics."""

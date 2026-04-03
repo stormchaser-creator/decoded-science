@@ -33,7 +33,7 @@ import psycopg2.extras
 from dotenv import load_dotenv
 
 _ROOT = Path(__file__).resolve().parent.parent.parent
-load_dotenv(_ROOT / ".env", override=False)
+load_dotenv(_ROOT / ".env", override=True)
 
 # Add AutoAIBiz to path so we can import the reach paper outreach generator
 _AUTOAIBIZ_PATH = Path.home() / "Projects" / "AutoAIBiz"
