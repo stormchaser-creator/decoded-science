@@ -4,7 +4,7 @@
 
 **Stack:** Python 3.12, FastAPI, PostgreSQL 17 (`encoded_human` DB — shared with Pearl), Neo4j, Redis, Anthropic Claude API, PM2.
 
-**Status (as of 2026-04-02):** 8-stage pipeline running. 60,588+ raw_papers, 17,278 extracted, 13,512 connections, 830 Intelligence Briefs. Bulk PMC downloader active.
+**Status (as of 2026-04-03):** 8-stage pipeline running. 60,588+ raw_papers, 17,278 extracted, 13,512 connections, 830 Intelligence Briefs. Bulk PMC downloader active (120K queued). 32.8% full-text coverage.
 
 ---
 
@@ -59,7 +59,7 @@ Both Decoded and Pearl import from this shared lib.
 
 ---
 
-## Data Numbers (as of 2026-04-02)
+## Data Numbers (as of 2026-04-03)
 
 | Table | Count |
 |-------|-------|
@@ -68,16 +68,21 @@ Both Decoded and Pearl import from this shared lib.
 | paper_connections | 13,512 |
 | intelligence_briefs | 830 |
 
+**Full-text coverage (32.8% overall):**
+- `full_text_pmc`: 51,538
+- `full_text_medrxiv`: 6,228
+- `full_text_biorxiv`: 4,180
+
 **Bulk PMC corpus:**
 - 579K aging-related PMIDs indexed
 - 171K with OA (open access) full text available
 - `oa_file_list.csv` (910MB) on disk
 - NCBI API key wired in `.env` as `NCBI_API_KEY`
-- Bulk PMC download running as of 2026-04-02 (PID 84167, log: `/tmp/pmc_bulk_download.log`)
+- Bulk PMC download running, 120K papers queued (log: `/tmp/pmc_bulk_download.log`)
 
 ---
 
-## Recent Changes (April 1–2, 2026)
+## Recent Changes (April 1–3, 2026)
 
 ### April 1 — Consolidation
 - `decoded/ingest/discover.py` refactored to use `shared-libs/pubmed-tools` instead of inline PubMed code
@@ -85,8 +90,16 @@ Both Decoded and Pearl import from this shared lib.
 
 ### April 2 — Bulk PMC
 - `decoded/ingest/bulk_pmc.py` updated with `.nxml` extension handling + transaction recovery
-- Bulk PMC download job started (PID 84167)
+- Bulk PMC download job started
 - NCBI API key now wired in `.env`
+
+### April 3 — bulk_pmc.py bug fixes + full-text backfill
+- **Bug fix:** `data_source` tagging was wrong — papers imported via bulk PMC now correctly tagged `full_text_pmc`
+- **Bug fix:** Dedup logic was skipping abstract-only papers that should have been upgraded to full text on re-import
+- **Bug fix:** `ON CONFLICT DO NOTHING` in upsert was silently blocking full-text upgrades for existing rows; replaced with proper upsert
+- **Backfill run:** 51,538 `full_text_pmc`, 6,228 `full_text_medrxiv`, 4,180 `full_text_biorxiv` — 32.8% full-text rate overall
+- PMC bulk download restarted with 120K papers queued
+- All 4 workers restarted (extract, graph, connect, critique)
 
 ---
 
@@ -166,6 +179,8 @@ cd /Users/whit/Projects/Decoded && source .venv/bin/activate && python decoded/i
 - **Outreach pipeline:** `decoded/outreach/` directory exists but not wired to any publishing target.
 - **Connection coverage:** 13,512 connections out of 17,278 extracted papers = ~78% coverage. Some papers have no connections yet.
 - **Explorer frontend:** Served via `vite preview` (not production build). For production, should be built and served via nginx.
+- **Neo4j OOM:** Heavy graph queries (large connectome traversals) cause Neo4j out-of-memory. Avoid deep traversals without LIMIT clauses.
+- **psycopg2 timeout:** Long-running graph sync sessions hit PostgreSQL idle timeout. `decoded-graph` worker auto-reconnects but may need a restart if it wedges.
 
 ---
 
