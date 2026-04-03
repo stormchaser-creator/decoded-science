@@ -102,6 +102,13 @@ Both Decoded and Pearl import from this shared lib.
 - PMC bulk download restarted with 120K papers queued
 - All 4 workers restarted (extract, graph, connect, critique)
 
+### April 3 — Author Outreach Pipeline (LIVE)
+- Merged `claude/vigorous-williams` → main: outreach processor, API endpoints, connect worker integration
+- Committed AutoAIBiz: `003_paper_outreach.sql`, `paper_outreach_generator.py`, `paper_outreach_email.txt`, `models.py`
+- DB migration applied: `reach_paper_outreach`, `reach_paper_outreach_cooldowns`, `reach_paper_outreach_unsubscribes` tables live
+- `decoded-outreach` PM2 process started (cron hourly, autorestart: false)
+- When `decoded-connect` finds connection ≥ 0.70 confidence → enqueued for outreach → LLM drafts 5-part email → Eric reviews/sends from Drericwhitney@gmail.com
+
 ---
 
 ## Environment Variables (`.env`)
@@ -162,7 +169,7 @@ cd /Users/whit/Projects/Decoded && source .venv/bin/activate && python decoded/i
 │   ├── graph/              # Neo4j sync worker
 │   ├── ingest/             # Paper ingestion (PubMed, PMC bulk)
 │   ├── models/             # Pydantic models
-│   ├── outreach/           # Publishing pipeline (not yet wired)
+│   ├── outreach/           # Author outreach processor (decoded-outreach PM2)
 │   ├── pearl/              # Pearl bridge (NOT YET BUILT)
 │   └── queue.py            # Job queue abstraction
 ├── explorer/               # Vite React frontend (port 5173)
@@ -179,7 +186,7 @@ cd /Users/whit/Projects/Decoded && source .venv/bin/activate && python decoded/i
 - **Neo4j OOM (decoded-connect):** `find_convergent_claims` and `find_shared_mechanisms` hitting 4.2GB transaction memory limit. Not crashing but degraded — getting fewer candidates. `dbms.memory.transaction.total.max` in Neo4j config may need tuning upward.
 - **decoded-graph psycopg2 timeout:** Occasional connection timeout after long sessions. Needs keepalive/reconnect guard in the graph worker.
 - **Pearl bridge (`decoded/pearl/`):** NOT BUILT. Architecture decided: batch cron job reads `raw_papers`, converts claims to `kb_entries` format, Pearl overrides on classification confidence. 27 Altini papers are the first target batch.
-- **Outreach pipeline:** `decoded/outreach/` directory exists but not wired to any publishing target.
+- **Outreach pipeline:** `decoded-outreach` running (cron hourly). Pending: Gmail MCP connector to create drafts from `drafted` items. See Author Outreach System section.
 - **Connection coverage:** 13,512 connections out of 17,278 extracted papers = ~78% coverage. Some papers have no connections yet.
 - **Explorer frontend:** Served via `vite preview` (not production build). For production, should be built and served via nginx.
 - **Neo4j OOM:** Heavy graph queries (large connectome traversals) cause Neo4j out-of-memory. Avoid deep traversals without LIMIT clauses.
