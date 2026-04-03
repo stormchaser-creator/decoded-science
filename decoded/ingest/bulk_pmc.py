@@ -541,21 +541,32 @@ async def download_and_parse_article(
     """Download a PMC article tar.gz and return (format, xml_bytes)."""
     url = f"{PMC_FTP_BASE}/{file_path}"
     async with semaphore:
-        try:
-            async with httpx.AsyncClient(timeout=120, follow_redirects=True) as client:
-                resp = await client.get(url)
-                if resp.status_code == 200:
-                    content = resp.content
-                    # Extract XML from tar.gz
-                    with tarfile.open(fileobj=io.BytesIO(content)) as tar:
-                        for member in tar.getmembers():
-                            if member.name.endswith(".xml") or member.name.endswith(".nxml"):
-                                f = tar.extractfile(member)
-                                if f:
-                                    return "jats", f.read()
-        except Exception as exc:
-            logger.debug("Download failed for %s: %s", pmcid, exc)
-        await asyncio.sleep(0.1)
+        for attempt in range(4):
+            try:
+                async with httpx.AsyncClient(timeout=120, follow_redirects=True) as client:
+                    resp = await client.get(url)
+                    if resp.status_code == 200:
+                        content = resp.content
+                        # Extract XML from tar.gz
+                        with tarfile.open(fileobj=io.BytesIO(content)) as tar:
+                            for member in tar.getmembers():
+                                if member.name.endswith(".xml") or member.name.endswith(".nxml"):
+                                    f = tar.extractfile(member)
+                                    if f:
+                                        return "jats", f.read()
+                        return None  # downloaded but no XML inside
+                    elif resp.status_code == 503:
+                        wait = 2 ** attempt * 5  # 5s, 10s, 20s, 40s
+                        logger.debug("503 for %s, retrying in %ds (attempt %d)", pmcid, wait, attempt + 1)
+                        await asyncio.sleep(wait)
+                        continue
+                    else:
+                        break  # 404 or other permanent error
+            except Exception as exc:
+                logger.debug("Download failed for %s: %s", pmcid, exc)
+                if attempt < 3:
+                    await asyncio.sleep(2 ** attempt * 2)
+        await asyncio.sleep(0.5)
     return None
 
 
