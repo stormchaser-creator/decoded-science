@@ -582,9 +582,10 @@ async def run_download_phase(
 
     path_map = build_pmid_to_path(all_pmids)
 
-    conn = get_db_conn()
-    existing_pmids = get_existing_pmids(conn) if skip_existing else set()
-    existing_pmcids = get_existing_pmcids(conn) if skip_existing else set()
+    _conn_pre = get_db_conn()
+    existing_pmids = get_existing_pmids(_conn_pre) if skip_existing else set()
+    existing_pmcids = get_existing_pmcids(_conn_pre) if skip_existing else set()
+    _conn_pre.close()
 
     # Filter to papers not already in DB
     to_process = {
@@ -608,6 +609,9 @@ async def run_download_phase(
     logger.info("Fetching PubMed metadata for %d papers...", len(to_process))
     metadata = await fetch_pubmed_metadata(list(to_process.keys()), api_key=api_key)
     logger.info("Got metadata for %d / %d papers", len(metadata), len(to_process))
+
+    # Re-open connection after long metadata fetch (previous connection may have timed out)
+    conn = get_db_conn()
 
     # Create ingest run record
     cur = conn.cursor()
