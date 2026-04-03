@@ -710,6 +710,30 @@ def get_convergences(
     return {"convergences": rows, "count": len(rows)}
 
 
+@app.get("/connections/{connection_id}")
+def get_connection(connection_id: str):
+    """Fetch a single connection by UUID (for deep-link outreach emails)."""
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute(
+        """
+        SELECT dc.*,
+               p_a.title as paper_a_title,
+               p_b.title as paper_b_title
+        FROM discovered_connections dc
+        JOIN raw_papers p_a ON p_a.id = dc.paper_a_id
+        JOIN raw_papers p_b ON p_b.id = dc.paper_b_id
+        WHERE dc.id = %s
+        """,
+        (connection_id,),
+    )
+    row = cur.fetchone()
+    release_db(conn)
+    if not row:
+        raise HTTPException(status_code=404, detail="Connection not found")
+    return _jsonify_row(dict(row))
+
+
 # ---------------------------------------------------------------------------
 # Gaps
 # ---------------------------------------------------------------------------
