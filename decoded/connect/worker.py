@@ -39,6 +39,9 @@ from decoded.connect.llm_discovery import LLMDiscovery
 from decoded.cost_tracker import CostTracker, CostBudget
 from decoded.graph.builder import GraphBuilder, NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD
 
+# Outreach: minimum confidence to queue a connection for author outreach
+OUTREACH_MIN_CONFIDENCE = 0.7
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s — %(message)s",
@@ -77,6 +80,30 @@ def fetch_paper_details(conn, paper_ids: list[str]) -> dict[str, dict]:
         paper_ids,
     )
     return {str(r["id"]): dict(r) for r in cur.fetchall()}
+
+
+def enqueue_paper_outreach(conn, connection_id: str, paper_a_id: str, paper_b_id: str, connection_type: str, confidence: float) -> None:
+    """Insert a pending_draft row into reach_paper_outreach for author outreach.
+
+    The decoded-outreach processor picks this up and generates the email.
+    No-ops if the connection was already queued.
+    """
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO reach_paper_outreach
+            (connection_id, paper_a_id, paper_b_id, connection_type, confidence, status, created_at)
+        VALUES (%s::uuid, %s::uuid, %s::uuid, %s, %s, 'pending_draft', NOW())
+        ON CONFLICT (connection_id) DO NOTHING
+        """,
+        (connection_id, paper_a_id, paper_b_id, connection_type, confidence),
+    )
+    conn.commit()
+    if cur.rowcount:
+        logger.info(
+            "Queued connection %s for author outreach (confidence %.0f%%)",
+            connection_id[:8], confidence * 100,
+        )
 
 
 def store_connection(conn, connection: dict) -> str:
@@ -288,6 +315,20 @@ class ConnectionWorker:
                         result["connection_type"],
                         result["confidence"],
                     )
+
+                    # Queue for author outreach if confidence meets threshold
+                    if result["confidence"] >= OUTREACH_MIN_CONFIDENCE:
+                        try:
+                            enqueue_paper_outreach(
+                                conn=conn,
+                                connection_id=conn_id,
+                                paper_a_id=pid_a,
+                                paper_b_id=pid_b,
+                                connection_type=result["connection_type"],
+                                confidence=result["confidence"],
+                            )
+                        except Exception as outreach_exc:
+                            logger.warning("Outreach enqueue failed (non-fatal): %s", outreach_exc)
 
             except Exception as exc:
                 logger.error("LLM validation error: %s", exc)

@@ -7,6 +7,7 @@
  *   decoded-graph    — Neo4j graph sync worker (batch, runs on interval)
  *   decoded-connect  — Connection discovery worker (graph + LLM)
  *   decoded-critique — Paper critique worker (Claude Sonnet)
+ *   decoded-outreach — Author outreach processor (generates emails from high-confidence connections)
  *   decoded-explorer — Vite React frontend (served by nginx in prod)
  *
  * Start:  pm2 start ecosystem.config.js
@@ -156,6 +157,30 @@ module.exports = {
       log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
       out_file: '/Users/whit/Projects/Decoded/logs/critique-out.log',
       error_file: '/Users/whit/Projects/Decoded/logs/critique-error.log',
+      merge_logs: true,
+    },
+    {
+      name: 'decoded-outreach',
+      cwd: '/Users/whit/Projects/Decoded',
+      script: '/Users/whit/Projects/Decoded/.venv/bin/python',
+      args: '-m decoded.outreach.processor --limit 10',
+      interpreter: 'none',
+      env: {
+        PYTHONPATH: '/Users/whit/Projects/Decoded:/Users/whit/Projects/AutoAIBiz',
+        DATABASE_URL: 'postgresql://whit@localhost:5432/encoded_human',
+        ANTHROPIC_API_KEY: _env.ANTHROPIC_API_KEY || '',
+        NCBI_API_KEY: _env.NCBI_API_KEY || '',
+      },
+      // Runs on a schedule — processes up to 10 pending items then exits.
+      // PM2 restarts it every hour. autorestart: false prevents runaway retries.
+      autorestart: false,
+      cron_restart: '0 * * * *',   // Every hour
+      max_restarts: 0,
+      watch: false,
+      max_memory_restart: '256M',
+      log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
+      out_file: '/Users/whit/Projects/Decoded/logs/outreach-out.log',
+      error_file: '/Users/whit/Projects/Decoded/logs/outreach-error.log',
       merge_logs: true,
     },
     {

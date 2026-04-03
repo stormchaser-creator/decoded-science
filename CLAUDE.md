@@ -4,7 +4,7 @@
 
 **Stack:** Python 3.12, FastAPI, PostgreSQL 17 (`encoded_human` DB — shared with Pearl), Neo4j, Redis, Anthropic Claude API, PM2.
 
-**Status (as of 2026-04-03):** 8-stage pipeline running. 60,588+ raw_papers, 17,278 extracted, 13,512 connections, 830 Intelligence Briefs. Bulk PMC downloader active (120K queued). 32.8% full-text coverage.
+**Status (as of 2026-04-03):** 8-stage pipeline running. 60,588+ raw_papers, 17,278 extracted, 13,512 connections, 830 Intelligence Briefs. Bulk PMC downloader active (120K queued). 32.8% full-text coverage. Author outreach pipeline wired (reach agent integration).
 
 ---
 
@@ -28,7 +28,7 @@ Ingest → Extract → Graph → Connect → Critique → API → Pearl Bridge �
 5. **Critique** (`decoded/critique/`): Claude Sonnet generates Intelligence Briefs (critical analysis + synthesis).
 6. **API** (`decoded/api/`): FastAPI REST API + Pearl connectome endpoint. Port 8000.
 7. **Pearl Bridge** (`decoded/pearl/`): NOT YET BUILT. Bridges `raw_papers` → Pearl's `kb_entries`. Architecture decided: batch cron, claims-first, Pearl overrides classification.
-8. **Outreach** (`decoded/outreach/`): Downstream publishing (not yet wired).
+8. **Outreach** (`decoded/outreach/`): Author email outreach — integrated into AutoAIBiz reach agent (see below).
 
 ### PM2 Processes (`ecosystem.config.js`)
 - `decoded-api` — FastAPI + uvicorn, port 8000, 2 workers, autorestart: true
@@ -36,6 +36,7 @@ Ingest → Extract → Graph → Connect → Critique → API → Pearl Bridge �
 - `decoded-graph` — Neo4j sync worker, autorestart: true, backoff 300s when idle
 - `decoded-connect` — Connection discovery worker, autorestart: **false** (run manually)
 - `decoded-critique` — Intelligence Brief generator (Claude Sonnet), autorestart: **false**
+- `decoded-outreach` — Author outreach processor, cron: every hour, autorestart: **false**
 - `decoded-explorer` — Vite React frontend, port 5173, autorestart: true
 
 **Important:** `decoded-extract`, `decoded-connect`, `decoded-critique` have `autorestart: false` and `max_restarts: 0` to control API costs. Run manually or restart via `pm2 restart <name>`.
@@ -186,8 +187,70 @@ cd /Users/whit/Projects/Decoded && source .venv/bin/activate && python decoded/i
 
 ---
 
+## Author Outreach System
+
+When `decoded-connect` discovers a connection with confidence ≥ 0.70, it automatically queues the connection for author outreach. The flow:
+
+```
+decoded-connect stores connection (confidence ≥ 0.70)
+  → INSERT into reach_paper_outreach (status=pending_draft)
+  → decoded-outreach processor runs hourly
+  → fetches paper details + author email from encoded_human DB
+  → PaperOutreachGenerator (AutoAIBiz reach agent) generates 5-part email
+  → status=drafted
+  → Eric reviews via GET /api/outreach/drafts
+  → Gmail MCP connector creates Gmail draft
+  → Eric sends from Drericwhitney@gmail.com
+```
+
+### Sender Identity
+- **From:** Dr. Eric Whitney, DO (Doctor of Osteopathic Medicine — NEVER "MD")
+- **Gmail:** Drericwhitney@gmail.com
+- **Site link:** https://thedecodedhuman.com/connections
+
+### Email Structure (5 parts, per Eric's spec)
+1. **Thankful** — genuine gratitude for their specific research contribution + AI disclosure
+2. **Impact** — where their work fits in the broader research landscape
+3. **Why it matters** — bigger-picture significance for patients/field/biology
+4. **The connection** — the specific AI-discovered connection with link to thedecodedhuman.com
+5. **Why it's important** — significance for future research + soft CTA ("I'd love to hear your thoughts")
+
+### Key Files
+- `decoded/connect/worker.py` — `enqueue_paper_outreach()` triggers after storing connection
+- `decoded/outreach/processor.py` — `decoded-outreach` PM2 process; processes pending items
+- `decoded/outreach/templates.py` — Backup/static template (5-part structure preserved)
+- `AutoAIBiz/agents/reach/src/paper_outreach_generator.py` — LLM email generator
+- `AutoAIBiz/agents/reach/src/prompts/paper_outreach_email.txt` — Prompt template
+- `AutoAIBiz/agents/reach/migrations/003_paper_outreach.sql` — DB schema
+
+### Database Tables (encoded_human PostgreSQL)
+- `reach_paper_outreach` — main queue (connection_id UNIQUE, status flow: pending_draft → drafted → gmail_draft_created → sent)
+- `reach_paper_outreach_cooldowns` — 90-day per-author cooldown tracking
+- `reach_paper_outreach_unsubscribes` — opt-out list
+
+### API Endpoints
+- `GET /api/outreach/pending` — pending + drafted items with paper titles
+- `GET /api/outreach/drafts` — drafted items ready for Gmail (includes full body)
+- `GET /api/outreach/stats` — queue counts by status + total LLM cost
+- `POST /api/outreach/skip/{id}` — mark item skipped
+- `POST /api/outreach/gmail-draft/{id}` — mark Gmail draft created (called by MCP connector)
+- `POST /api/outreach/mark-sent/{id}` — mark as sent after Eric sends
+
+### Setup: Run the migration first
+```bash
+psql -d encoded_human -f ~/Projects/AutoAIBiz/agents/reach/migrations/003_paper_outreach.sql
+```
+
+### Safety
+- 90-day per-author cooldown (checked via reach_paper_outreach sent_at)
+- Unsubscribe tracking (reach_paper_outreach_unsubscribes)
+- No email = skip (author email required; sourced from PubMed metadata)
+- Non-fatal: outreach failures never block connection discovery
+
+---
+
 ## Cross-Project Connections
 
 - **The Encoded Human** (`~/Projects/The-Encoded-Human/`): Pearl is the downstream consumer of Decoded's knowledge. Same PostgreSQL DB. Bridge not yet built.
 - **shared-libs/pubmed-tools** (`~/Projects/shared-libs/pubmed-tools/`): Shared PubMed tooling used by both Decoded and Pearl.
-- **AutoAIBiz** (`~/Projects/AutoAIBiz/`): Reach agent can potentially publish Intelligence Briefs to Substack/X.
+- **AutoAIBiz** (`~/Projects/AutoAIBiz/`): Reach agent provides author outreach infrastructure. `paper_outreach_generator.py` generates emails from Decoded connections. Reach agent also publishes Intelligence Briefs to Substack/X (planned).

@@ -2280,6 +2280,146 @@ def get_chat_history(paper_id: str, current_user: dict = Depends(get_admin_user)
 
 
 # ---------------------------------------------------------------------------
+# Outreach endpoints (reach_paper_outreach table — shared encoded_human DB)
+# ---------------------------------------------------------------------------
+
+@app.get("/api/outreach/pending")
+def outreach_pending(limit: int = Query(default=20, le=100)):
+    """List pending outreach items (pending_draft + drafted) with paper details."""
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute(
+        """
+        SELECT
+            o.id, o.connection_id::text, o.status,
+            o.to_name, o.to_email, o.subject,
+            o.connection_type, o.confidence,
+            o.llm_cost_usd, o.created_at, o.drafted_at,
+            pa.title AS paper_a_title,
+            pa.authors AS paper_a_authors,
+            pb.title AS paper_b_title
+        FROM reach_paper_outreach o
+        LEFT JOIN raw_papers pa ON pa.id = o.paper_a_id
+        LEFT JOIN raw_papers pb ON pb.id = o.paper_b_id
+        WHERE o.status IN ('pending_draft', 'drafted')
+        ORDER BY o.created_at DESC
+        LIMIT %s
+        """,
+        (limit,),
+    )
+    rows = [_jsonify_row(dict(r)) for r in cur.fetchall()]
+    release_db(conn)
+    return {"items": rows, "count": len(rows)}
+
+
+@app.get("/api/outreach/drafts")
+def outreach_drafts(limit: int = Query(default=50, le=200)):
+    """List items with generated email content ready for Gmail draft creation."""
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute(
+        """
+        SELECT
+            o.id, o.connection_id::text, o.status,
+            o.to_name, o.to_email, o.subject, o.body,
+            o.connection_type, o.confidence,
+            o.llm_cost_usd, o.drafted_at,
+            pa.title AS paper_a_title,
+            pb.title AS paper_b_title
+        FROM reach_paper_outreach o
+        LEFT JOIN raw_papers pa ON pa.id = o.paper_a_id
+        LEFT JOIN raw_papers pb ON pb.id = o.paper_b_id
+        WHERE o.status = 'drafted'
+        ORDER BY o.drafted_at DESC
+        LIMIT %s
+        """,
+        (limit,),
+    )
+    rows = [_jsonify_row(dict(r)) for r in cur.fetchall()]
+    release_db(conn)
+    return {"items": rows, "count": len(rows)}
+
+
+@app.get("/api/outreach/stats")
+def outreach_stats():
+    """Outreach queue statistics."""
+    conn = get_db()
+    cur = conn.cursor()
+    stats = {}
+    for status in ("pending_draft", "drafted", "gmail_draft_created", "sent", "skipped", "failed"):
+        cur.execute(
+            "SELECT count(*) FROM reach_paper_outreach WHERE status = %s",
+            (status,),
+        )
+        stats[status] = cur.fetchone()[0]
+    cur.execute("SELECT count(*) FROM reach_paper_outreach")
+    stats["total"] = cur.fetchone()[0]
+    cur.execute("SELECT coalesce(sum(llm_cost_usd), 0) FROM reach_paper_outreach")
+    stats["total_cost_usd"] = float(cur.fetchone()[0])
+    release_db(conn)
+    return stats
+
+
+@app.post("/api/outreach/skip/{outreach_id}")
+def outreach_skip(outreach_id: int):
+    """Mark an outreach item as skipped."""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE reach_paper_outreach SET status = 'skipped' WHERE id = %s AND status NOT IN ('sent', 'skipped')",
+        (outreach_id,),
+    )
+    conn.commit()
+    if cur.rowcount == 0:
+        release_db(conn)
+        raise HTTPException(status_code=404, detail="Item not found or already sent/skipped")
+    release_db(conn)
+    return {"status": "skipped", "id": outreach_id}
+
+
+@app.post("/api/outreach/mark-sent/{outreach_id}")
+def outreach_mark_sent(outreach_id: int, gmail_draft_id: str = Body(default=None, embed=True)):
+    """Mark an outreach item as sent (called after Eric sends the Gmail draft)."""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        UPDATE reach_paper_outreach
+        SET status = 'sent', sent_at = NOW(), gmail_draft_id = %s
+        WHERE id = %s AND status IN ('drafted', 'gmail_draft_created')
+        """,
+        (gmail_draft_id, outreach_id),
+    )
+    conn.commit()
+    if cur.rowcount == 0:
+        release_db(conn)
+        raise HTTPException(status_code=404, detail="Item not found or not in sendable state")
+    release_db(conn)
+    return {"status": "sent", "id": outreach_id}
+
+
+@app.post("/api/outreach/gmail-draft/{outreach_id}")
+def outreach_mark_gmail_draft(outreach_id: int, gmail_draft_id: str = Body(embed=True)):
+    """Mark an item as having a Gmail draft created (called by Gmail MCP connector)."""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        UPDATE reach_paper_outreach
+        SET status = 'gmail_draft_created', gmail_draft_id = %s
+        WHERE id = %s AND status = 'drafted'
+        """,
+        (gmail_draft_id, outreach_id),
+    )
+    conn.commit()
+    if cur.rowcount == 0:
+        release_db(conn)
+        raise HTTPException(status_code=404, detail="Item not found or not in drafted state")
+    release_db(conn)
+    return {"status": "gmail_draft_created", "id": outreach_id, "gmail_draft_id": gmail_draft_id}
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 

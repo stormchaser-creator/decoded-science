@@ -1,7 +1,21 @@
 """Email template system for author outreach.
 
-Pearl-quality outreach: specific, value-first, AI disclosed in first paragraph.
-Templates adapt based on connection type and paper content.
+Emails come from Dr. Eric Whitney, DO — board-certified neurosurgeon and
+researcher reaching out as a genuine peer with a discovered finding.
+
+Five-part structure (per Eric's spec):
+  1. Thankful   — genuine gratitude for their specific work
+  2. Impact     — where their work is making an impact in the research landscape
+  3. Why it matters — bigger-picture significance of their contribution
+  4. The connection — the specific discovered connection, clearly stated
+  5. Why it's important — significance of this connection for advancing understanding
+
+Every email:
+  - Discloses AI involvement in the first paragraph
+  - Links to thedecodedhuman.com for the visualized connection
+  - Is concise (3–4 short paragraphs, under 300 words)
+  - Has a warm, collegial researcher-to-researcher tone
+  - Does NOT use "MD" — Eric is a DO (Doctor of Osteopathic Medicine)
 """
 
 from __future__ import annotations
@@ -18,6 +32,10 @@ logger = logging.getLogger(__name__)
 
 TEMPLATE_MODEL = "claude-sonnet-4-6"
 
+SENDER_NAME = "Dr. Eric Whitney, DO"
+SENDER_EMAIL = "Drericwhitney@gmail.com"
+SITE_URL = "https://thedecodedhuman.com"
+
 
 # ---------------------------------------------------------------------------
 # Static template helpers
@@ -32,14 +50,6 @@ CONNECTION_TYPE_PHRASES = {
     "convergent_evidence": "converges on similar findings as",
     "methodological_parallel": "uses a closely parallel methodology to",
     "meta_analysis_of": "synthesizes findings that include",
-}
-
-SUBJECT_TEMPLATES = {
-    "convergent_evidence": "Your work on {topic_a} may connect to {topic_b}",
-    "mechanism_for": "Possible mechanistic link between your work and {connected_paper_short}",
-    "contradicts": "An interesting discrepancy between your findings and recent work",
-    "extends": "Building on your {topic_a} findings — a potential connection",
-    "default": "A discovered connection involving your recent research",
 }
 
 
@@ -78,8 +88,8 @@ class EmailTemplateGenerator:
         paper: dict[str, Any],
         connection: dict[str, Any],
         connected_paper: dict[str, Any],
-        sender_name: str = "The Decoded Team",
-        sender_email: str = "hello@decoded.ai",
+        sender_name: str = SENDER_NAME,
+        sender_email: str = SENDER_EMAIL,
     ) -> dict[str, str]:
         """Generate a personalized outreach email.
 
@@ -111,7 +121,6 @@ class EmailTemplateGenerator:
             response.usage.output_tokens,
         )
 
-        # Parse subject and body
         subject, body = self._parse_email(raw)
 
         logger.info("Generated email for %s | cost $%.4f", author_name, cost)
@@ -123,6 +132,7 @@ class EmailTemplateGenerator:
             "body": body,
             "paper_id": str(paper.get("id", "")),
             "connection_id": str(connection.get("id", "")),
+            "paper_b_id": str(connected_paper.get("id", "")),
             "cost_usd": cost,
         }
 
@@ -137,49 +147,81 @@ class EmailTemplateGenerator:
         findings = paper.get("key_findings") or []
         if isinstance(findings, str):
             findings = json.loads(findings)
-        finding_str = findings[0][:200] if findings else paper.get("abstract", "")[:200]
+        finding_str = findings[0][:250] if findings else paper.get("abstract", "")[:250]
 
         connected_findings = connected_paper.get("key_findings") or []
         if isinstance(connected_findings, str):
             connected_findings = json.loads(connected_findings)
-        connected_finding_str = connected_findings[0][:200] if connected_findings else connected_paper.get("abstract", "")[:200]
+        connected_finding_str = connected_findings[0][:250] if connected_findings else connected_paper.get("abstract", "")[:250]
 
         conn_type_phrase = CONNECTION_TYPE_PHRASES.get(
             connection.get("connection_type", "default"),
             "connects to"
         )
 
-        return f"""You are writing a personalized, thoughtful outreach email from a scientific research intelligence platform called Decoded.
+        paper_title = paper.get("title", "your paper")
+        connected_title = connected_paper.get("title", "a related paper")
+        confidence_pct = connection.get("confidence", 0)
+        conn_description = connection.get("description", "")
+        conn_type = connection.get("connection_type", "convergent_evidence")
 
-CRITICAL REQUIREMENTS:
-1. Disclose AI in the FIRST PARAGRAPH — Decoded uses AI to discover connections across the literature
-2. Be specific about the actual scientific connection — no generic flattery
-3. Lead with VALUE to the researcher, not what you want from them
-4. Be concise (under 250 words)
-5. Professional but warm tone — researcher to researcher
-6. Do NOT ask for anything in the first email — just share the discovery
-7. Include an unsubscribe note at the bottom
+        return f"""You are writing a personalized outreach email on behalf of Dr. Eric Whitney, DO — a board-certified neurosurgeon and researcher who runs The Decoded Human, a literature connectome that uses AI to map connections across biomedical research.
+
+SENDER: {sender_name} (DO — Doctor of Osteopathic Medicine, NOT MD)
+SENDER EMAIL: {SENDER_EMAIL}
+SITE: {SITE_URL}
+
+RECIPIENT FIRST NAME: {first_name}
 
 RECIPIENT'S PAPER:
-Title: {paper.get('title', '')}
+Title: {paper_title}
 Key finding: {finding_str}
 
 CONNECTED PAPER:
-Title: {connected_paper.get('title', '')}
+Title: {connected_title}
 Key finding: {connected_finding_str}
 
-CONNECTION TYPE: {connection.get('connection_type', '')}
-CONNECTION DESCRIPTION: {connection.get('description', '')}
-CONFIDENCE: {connection.get('confidence', 0):.0%}
+CONNECTION TYPE: {conn_type}
+CONNECTION PHRASE: {conn_type_phrase}
+CONNECTION DESCRIPTION: {conn_description}
+AI CONFIDENCE: {confidence_pct:.0%}
 
-SENDER: {sender_name}
-RECIPIENT FIRST NAME: {first_name}
+REQUIRED EMAIL STRUCTURE — follow this exact five-part flow:
 
-Write the email now. Format as:
-SUBJECT: [subject line]
+1. THANKFUL — Open with genuine, specific gratitude for their research contribution.
+   Express real appreciation for what they discovered or demonstrated, referencing specifics.
+   Disclose AI in this first paragraph: mention that The Decoded Human uses AI to map
+   connections across the literature, and that's how this email came to be written.
+
+2. IMPACT — Show where their work is making an impact. Describe how their paper's
+   findings fit into the broader research landscape and what it means for the field.
+   Be specific to their actual findings, not generic.
+
+3. WHY IT MATTERS — Explain the bigger-picture significance of their contribution.
+   Why does this work matter for patients, for the field, for our understanding of biology?
+   Make this feel like a neurosurgeon-researcher peer recognizing their work.
+
+4. THE CONNECTION — Present the specific discovered connection between their paper
+   and "{connected_title}". Be clear, logical, and specific. State the connection type
+   ({conn_type_phrase}) and what exactly the connection is.
+   Include the link: {SITE_URL}/connections (where this connection is visualized).
+
+5. WHY IT'S IMPORTANT — Explain why this specific connection matters for advancing
+   understanding. What could it mean for future research? What questions does it open?
+   Close with a soft, genuine CTA: "I'd love to hear your thoughts on this."
+
+TONE REQUIREMENTS:
+- Warm, collegial, researcher-to-researcher — not marketing
+- Genuine scientific curiosity, not flattery
+- Concise: 3–4 short paragraphs, under 300 words total
+- Do NOT ask for anything in the first email beyond their thoughts
+- Include unsubscribe note at the very bottom (single line)
+
+FORMAT YOUR RESPONSE EXACTLY AS:
+SUBJECT: [subject line — specific, not generic]
 
 BODY:
-[email body]"""
+[email body following the five-part structure above]"""
 
     def _parse_email(self, raw: str) -> tuple[str, str]:
         """Parse subject and body from the LLM response."""
@@ -188,7 +230,7 @@ BODY:
         body_lines = []
         in_body = False
 
-        for i, line in enumerate(lines):
+        for line in lines:
             if line.upper().startswith("SUBJECT:"):
                 subject = line.split(":", 1)[1].strip()
             elif line.upper().startswith("BODY:"):
@@ -196,7 +238,7 @@ BODY:
             elif in_body:
                 body_lines.append(line)
 
-        # Fallback: just use first line as subject, rest as body
+        # Fallback: first line as subject, rest as body
         if not subject and lines:
             subject = lines[0].replace("Subject:", "").replace("SUBJECT:", "").strip()
             body_lines = lines[2:] if len(lines) > 2 else lines[1:]
@@ -213,7 +255,7 @@ def generate_static_email(
     paper: dict[str, Any],
     connection: dict[str, Any],
     connected_paper: dict[str, Any],
-    sender_name: str = "The Decoded Team",
+    sender_name: str = SENDER_NAME,
 ) -> dict[str, str]:
     """Generate a basic outreach email without LLM (deterministic, for testing)."""
     contact = paper.get("contact") or {}
@@ -222,25 +264,30 @@ def generate_static_email(
     conn_type = connection.get("connection_type", "connects to")
     conn_phrase = CONNECTION_TYPE_PHRASES.get(conn_type, "connects to")
 
-    subject = f"AI-discovered connection: Your work {conn_phrase[:30]} recent research"
+    paper_title = _truncate(paper.get("title"), 90)
+    connected_title = _truncate(connected_paper.get("title"), 90)
+    conn_description = connection.get("description", "The papers share significant biological overlap.")
+
+    subject = f"A connection discovered in your research on {_truncate(paper.get('title'), 50)}"
 
     body = f"""Dear {first_name},
 
-I'm writing from Decoded, a research intelligence platform that uses AI to discover connections across the scientific literature. Our system surfaced an interesting link involving your recent work.
+I'm writing to share something that emerged from The Decoded Human — a literature connectome I run that uses AI to map connections across biomedical research. Your paper "{paper_title}" caught our system's attention, and I wanted to reach out personally.
 
-Your paper "{_truncate(paper.get('title'), 80)}" {conn_phrase} "{_truncate(connected_paper.get('title'), 80)}".
+Your work makes a meaningful contribution to this area of research. The findings are exactly the kind of rigorous, specific contribution that advances our collective understanding — and that's precisely why it surfaced in our analysis.
 
-Specifically: {connection.get('description', 'The papers share significant biological overlap.')}
+In the broader context, work like yours matters because it provides the kind of grounded evidence the field needs to move forward. We've indexed thousands of papers, and yours stands out for the specificity of its contribution.
 
-We thought you might find this connection useful for future research directions or grant applications. Decoded continuously maps relationships across thousands of papers in your field.
+What's particularly interesting: our system discovered that your paper {conn_phrase} "{connected_title}". {conn_description} You can see this connection visualized at {SITE_URL}/connections.
 
-No action needed — we're just sharing this discovery. If you'd like to explore the full connection map for your research area, reply to this email and we'll set you up with access.
+This connection could be significant for future research directions in this area. I'd love to hear your thoughts on whether this resonates with your own sense of where the field is heading.
 
 Warmly,
 {sender_name}
+The Decoded Human | {SITE_URL}
 
 ---
-This message was sent by Decoded's AI-powered literature monitoring system. To unsubscribe, reply with "unsubscribe" in the subject line."""
+To unsubscribe from future notes, reply with "unsubscribe" in the subject line."""
 
     return {
         "to_name": author_name,
@@ -249,5 +296,6 @@ This message was sent by Decoded's AI-powered literature monitoring system. To u
         "body": body,
         "paper_id": str(paper.get("id", "")),
         "connection_id": str(connection.get("id", "")),
+        "paper_b_id": str(connected_paper.get("id", "")),
         "cost_usd": 0.0,
     }
