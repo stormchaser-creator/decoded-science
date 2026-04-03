@@ -292,32 +292,72 @@ def get_db_conn():
 
 
 def get_existing_pmids(conn) -> set[str]:
+    """Return PMIDs that already have full text — these are truly done."""
     cur = conn.cursor()
-    cur.execute("SELECT external_id FROM raw_papers WHERE source='pubmed'")
+    cur.execute(
+        "SELECT external_id FROM raw_papers WHERE source='pubmed'"
+        " AND full_text IS NOT NULL AND full_text != ''"
+    )
     return {str(r[0]) for r in cur.fetchall()}
 
 
 def get_existing_pmcids(conn) -> set[str]:
+    """Return PMCIDs that already have full text — these are truly done."""
     cur = conn.cursor()
-    cur.execute("SELECT pmc_id FROM raw_papers WHERE pmc_id IS NOT NULL")
+    cur.execute(
+        "SELECT pmc_id FROM raw_papers WHERE pmc_id IS NOT NULL"
+        " AND full_text IS NOT NULL AND full_text != ''"
+    )
     return {str(r[0]) for r in cur.fetchall()}
 
 
 def insert_paper(conn, run_id: str, record: dict) -> tuple[str, bool]:
-    """Insert a paper from bulk download. Returns (paper_id, is_new)."""
+    """Insert or update a paper from bulk download. Returns (paper_id, changed).
+
+    If a paper already exists with full text, skip it (return False).
+    If a paper exists but lacks full text and we now have full text, UPDATE it.
+    If the paper doesn't exist, INSERT it.
+    Always writes the correct data_source tag.
+    """
     cur = conn.cursor()
     source = record.get("source", "pubmed")
     external_id = record.get("external_id") or record.get("pmid", "")
     if not external_id:
         return "", False
 
+    has_full_text = bool(record.get("full_text"))
+    data_source = "full_text_pmc" if has_full_text else "abstract_only"
+
     cur.execute(
-        "SELECT id FROM raw_papers WHERE source=%s AND external_id=%s",
+        "SELECT id, (full_text IS NOT NULL AND full_text != '') as has_ft"
+        " FROM raw_papers WHERE source=%s AND external_id=%s",
         (source, external_id),
     )
     existing = cur.fetchone()
     if existing:
-        return str(existing[0]), False
+        existing_id, existing_has_ft = existing
+        if existing_has_ft:
+            # Already has full text — nothing to do
+            return str(existing_id), False
+        if has_full_text:
+            # Upgrade abstract-only record to full text
+            cur.execute(
+                """UPDATE raw_papers SET
+                    full_text=%s, sections=%s, data_source=%s,
+                    status='parsed', ingest_run_id=%s, updated_at=NOW()
+                   WHERE id=%s""",
+                (
+                    record.get("full_text"),
+                    json.dumps(record.get("sections") or {}),
+                    data_source,
+                    run_id,
+                    str(existing_id),
+                ),
+            )
+            conn.commit()
+            return str(existing_id), True
+        # Both old and new are abstract-only — skip
+        return str(existing_id), False
 
     from datetime import datetime
     pub_date = record.get("pub_date")
@@ -335,21 +375,19 @@ def insert_paper(conn, run_id: str, record: dict) -> tuple[str, bool]:
         pub_year = pub_date_obj.year
 
     paper_id = str(uuid.uuid4())
-    status = "parsed" if record.get("full_text") or record.get("sections") else (
-        "fetched" if record.get("abstract") else "queued"
-    )
+    status = "parsed" if has_full_text else ("fetched" if record.get("abstract") else "queued")
 
     cur.execute(
         """
         INSERT INTO raw_papers (
             id, source, external_id, title, abstract, full_text, sections,
             authors, journal, published_date, pub_year, doi, pmc_id,
-            mesh_terms, keywords, status, ingest_run_id, raw_metadata,
+            mesh_terms, keywords, status, data_source, ingest_run_id, raw_metadata,
             reference_count, references_list, created_at, updated_at
         ) VALUES (
             %s,%s,%s,%s,%s,%s,%s,
             %s,%s,%s,%s,%s,%s,
-            %s,%s,%s,%s,%s,
+            %s,%s,%s,%s,%s,%s,
             %s,%s,NOW(),NOW()
         )
         ON CONFLICT (source, external_id) DO NOTHING
@@ -370,6 +408,7 @@ def insert_paper(conn, run_id: str, record: dict) -> tuple[str, bool]:
             json.dumps(record.get("mesh_terms") or []),
             json.dumps(record.get("keywords") or []),
             status,
+            data_source,
             run_id,
             json.dumps(record.get("raw_metadata") or {}),
             record.get("reference_count") or 0,
