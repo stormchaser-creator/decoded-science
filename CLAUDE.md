@@ -265,6 +265,8 @@ psql -d encoded_human -f ~/Projects/AutoAIBiz/agents/reach/migrations/003_paper_
 
 ## Cross-Project Connections
 
+See **CROSS-PROJECT.md** for detailed integration status and wiring details.
+
 - **The Encoded Human** (`~/Projects/The-Encoded-Human/`): Pearl is the downstream consumer of Decoded's knowledge. Same PostgreSQL DB. Bridge not yet built.
 - **shared-libs/pubmed-tools** (`~/Projects/shared-libs/pubmed-tools/`): Shared PubMed tooling used by both Decoded and Pearl.
 - **AutoAIBiz** (`~/Projects/AutoAIBiz/`): Reach agent provides author outreach infrastructure. `paper_outreach_generator.py` generates emails from Decoded connections. Reach agent also publishes Intelligence Briefs to Substack/X (planned).
