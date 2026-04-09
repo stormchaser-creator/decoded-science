@@ -12,10 +12,13 @@ Mapping:
   Mechanisms           → operation: Transduction
   Key findings         → operation: Synthesis
 
-Density:
-  strong evidence → spirit  (highest density, most certain)
-  moderate        → mind
-  weak / unknown  → body
+Density (INVERTED — Pearl + Claude review 2026-04-08):
+  strong evidence → body    (body = most measurable, most differentiated)
+  moderate        → soul    (soul = pattern-level, relational, meaning-bearing)
+  weak / unknown  → spirit  (spirit = least differentiated, field-level signal)
+
+Source authority for all Decoded-bridged entries: 0.55
+  (above web-ingested at 0.50, below core KB at 0.70, below architect-curated at 0.90)
 """
 
 from __future__ import annotations
@@ -41,12 +44,16 @@ _CLAIM_OP_MAP = {
     "descriptive":  "Synthesis",
 }
 
-# Map from evidence strength to Pearl density
+# Map from evidence strength to Pearl density (INVERTED)
+# Body = most measurable (strong). Soul = pattern-level (moderate). Spirit = field-level (weak).
 _DENSITY_MAP = {
-    "strong":   "spirit",
-    "moderate": "mind",
-    "weak":     "body",
+    "strong":   "body",
+    "moderate": "soul",
+    "weak":     "spirit",
 }
+
+# Source authority for all Decoded-bridged entries
+DECODED_SOURCE_AUTHORITY = 0.55
 
 
 def _get_conn():
@@ -97,6 +104,7 @@ def bridge_extraction_to_pearl(
         confidence: str = "moderate",
         epistemic_tier: int = 1,
         structured_data: dict | None = None,
+        source_authority: float = DECODED_SOURCE_AUTHORITY,
     ):
         entry_id = f"decoded-{uuid.uuid4().hex[:12]}"
         cur.execute(
@@ -105,12 +113,12 @@ def bridge_extraction_to_pearl(
                 id, workstation, operation, entry_type,
                 title, element, content,
                 epistemic_tier, confidence, density,
-                source_file, structured_data
+                source_file, structured_data, source_authority
             ) VALUES (
                 %s, %s, %s, %s,
                 %s, %s, %s,
                 %s, %s, %s,
-                %s, %s
+                %s, %s, %s
             )
             ON CONFLICT (id) DO NOTHING
             """,
@@ -127,6 +135,7 @@ def bridge_extraction_to_pearl(
                 density,
                 source_file,
                 json.dumps(structured_data or {}),
+                source_authority,
             ),
         )
         return entry_id
@@ -168,18 +177,14 @@ def bridge_extraction_to_pearl(
 
         title = _truncate(desc, 200)
         content = _build_mech_content(mech, paper_title, journal, year, doi)
-        density = _DENSITY_MAP.get(
-            str(getattr(mech, "confidence", 0.7)),
-            "mind"
-        )
-        # Use numeric confidence to set density
+        # Use numeric confidence to set density (INVERTED mapping)
         conf_val = getattr(mech, "confidence", 0.7) or 0.7
         if conf_val >= 0.8:
-            density = "spirit"
+            density = "body"     # high confidence = most measurable
         elif conf_val >= 0.5:
-            density = "mind"
+            density = "soul"     # moderate = pattern-level
         else:
-            density = "body"
+            density = "spirit"   # low confidence = field-level signal
 
         _insert_entry(
             title=title,
@@ -209,7 +214,7 @@ def bridge_extraction_to_pearl(
             content=f"Key finding from: {paper_title} ({year})\nJournal: {journal}\n\n{finding}",
             operation="Synthesis",
             entry_type="decoded_finding",
-            density="mind",
+            density="soul",  # findings = pattern-level (moderate evidence)
             confidence="moderate",
             structured_data={"paper_id": paper_id, "doi": doi},
         )

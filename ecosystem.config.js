@@ -184,6 +184,28 @@ module.exports = {
       merge_logs: true,
     },
     {
+      name: 'decoded-pearl-bridge',
+      cwd: '/Users/whit/Projects/Decoded',
+      script: '/Users/whit/Projects/Decoded/.venv/bin/python',
+      args: '-m decoded.pearl.batch_bridge --unbridged --limit 100',
+      interpreter: 'none',
+      env: {
+        PYTHONPATH: '/Users/whit/Projects/Decoded',
+        DATABASE_URL: 'postgresql://whit@localhost:5432/encoded_human',
+      },
+      // Runs at 3 AM daily (after Decoded extract/connect finish).
+      // 3 AM not 2 AM: extract+connect may not finish before 2 AM as corpus grows.
+      cron_restart: '0 3 * * *',
+      autorestart: false,
+      max_restarts: 0,
+      watch: false,
+      max_memory_restart: '512M',
+      log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
+      out_file: '/Users/whit/Projects/Decoded/logs/pearl-bridge-out.log',
+      error_file: '/Users/whit/Projects/Decoded/logs/pearl-bridge-error.log',
+      merge_logs: true,
+    },
+    {
       name: 'decoded-explorer',
       cwd: '/Users/whit/Projects/Decoded/explorer',
       script: 'node_modules/.bin/vite',
