@@ -1,5 +1,8 @@
 # Decoded — Session Orientation
 
+> ## VERIFICATION REQUIRED — READ BEFORE DECLARING ANYTHING DONE
+> **`.claude/rules/verification-protocol.md` is mandatory.** Every task must be verified end-to-end before you say "done." Imports must not break. Pipeline stages must produce output rows. API routes must be curl-tested. PM2 processes must be online after 10 seconds. DB tables must be queried on `Whits-Mac-mini.local`. Eric finds every bug you skip — that stops now.
+
 **What:** Decoded is a literature connectome pipeline that ingests biomedical research papers, extracts structured knowledge (claims, methods, findings), builds a Neo4j graph of connections between papers, and produces Intelligence Briefs. Outputs feed into Pearl (The Encoded Human) via a bridge not yet built.
 
 **Stack:** Python 3.12, FastAPI, PostgreSQL 17 (`encoded_human` DB — shared with Pearl), Neo4j, Redis, Anthropic Claude API, PM2.
