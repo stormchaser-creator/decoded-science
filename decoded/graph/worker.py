@@ -185,7 +185,11 @@ class GraphWorker:
                 stats["errors"] += 1
 
         # Sync connection edges from discovered_connections table
+        # Re-open a fresh DB connection — the original may have been dropped
+        # after being idle for the duration of the Neo4j processing loop.
         if self.sync_connections:
+            conn.close()
+            conn = get_db_conn()
             connections = fetch_connections(conn)
             logger.info("Syncing %d connection edges...", len(connections))
             for conn_row in connections:
