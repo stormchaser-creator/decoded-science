@@ -652,8 +652,7 @@ def run_batch_bridge(
         logger.info("Found %d papers matching query", len(papers))
 
         if not papers:
-            logger.info("No papers found. Nothing to bridge.")
-            return stats
+            logger.info("No papers found. Skipping paper bridging — will still process connections.")
 
         # 2. Process each paper
         for paper in papers:
