@@ -232,6 +232,15 @@ class ExtractionWorker:
 
     def run(self) -> dict[str, Any]:
         """Run extraction. Returns stats dict."""
+        # Check daily budget BEFORE opening a DB connection or fetching papers.
+        # This prevents a tight PM2 restart loop when the daily limit is hit:
+        # returning total=0 triggers the DECODE_EMPTY_BACKOFF sleep so the
+        # worker waits (default 1 hour) before exiting and being restarted.
+        ok, reason = self.cost_tracker.check_budget()
+        if not ok:
+            logger.info("Daily budget already reached — sleeping before exit: %s", reason)
+            return {"total": 0, "extracted": 0, "errors": 0, "skipped": 0}
+
         conn = get_db_conn()
 
         papers = fetch_papers_for_extraction(

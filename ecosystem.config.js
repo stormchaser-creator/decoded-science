@@ -60,7 +60,11 @@ module.exports = {
       name: 'decoded-extract',
       cwd: '/Users/whit/Projects/Decoded',
       script: '/Users/whit/Projects/Decoded/.venv/bin/python',
-      args: '-m decoded.extract.worker --limit 200 --concurrency 3 --daily-budget 5 --total-budget 5',
+      // Full throughput: 10 concurrent, 5000/batch, $50/day budget.
+      // Worker exits after each batch; PM2 restarts after restart_delay.
+      // When daily budget is hit, worker returns total=0 → sleeps DECODE_EMPTY_BACKOFF
+      // (1 hour) before exit, so restarts don't hammer the API.
+      args: '-m decoded.extract.worker --limit 5000 --concurrency 10 --daily-budget 50 --total-budget 50',
       interpreter: 'none',
       env: {
         PYTHONPATH: '/Users/whit/Projects/Decoded',
@@ -70,11 +74,13 @@ module.exports = {
         NEO4J_PASSWORD: _env.NEO4J_PASSWORD || '',
         REDIS_URL: 'redis://localhost:6379/0',
         ANTHROPIC_API_KEY: _env.ANTHROPIC_API_KEY || '',
-        DECODE_EMPTY_BACKOFF: '120',
-        DECODE_ERROR_BACKOFF: '60',
+        DECODE_EMPTY_BACKOFF: '3600',   // sleep 1 hour when budget/queue empty
+        DECODE_ERROR_BACKOFF: '120',
       },
-      autorestart: false,     // DO NOT auto-restart — run manually or via cron
-      max_restarts: 0,
+      autorestart: true,      // continuously process — budget check prevents tight loops
+      max_restarts: 500,
+      restart_delay: 30000,   // 30s between restarts
+      min_uptime: '10s',
       watch: false,
       max_memory_restart: '512M',
       log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
@@ -113,7 +119,9 @@ module.exports = {
       name: 'decoded-connect',
       cwd: '/Users/whit/Projects/Decoded',
       script: '/Users/whit/Projects/Decoded/.venv/bin/python',
-      args: '-m decoded.connect.worker --limit 200 --daily-budget 3 --total-budget 3',
+      // Full throughput: 500 candidates/run, $10/day budget, runs every 30 min.
+      // cron_restart fires after extract has had time to queue new papers.
+      args: '-m decoded.connect.worker --limit 500 --daily-budget 10 --total-budget 10',
       interpreter: 'none',
       env: {
         PYTHONPATH: '/Users/whit/Projects/Decoded',
@@ -125,6 +133,7 @@ module.exports = {
         ANTHROPIC_API_KEY: _env.ANTHROPIC_API_KEY || '',
       },
       autorestart: false,
+      cron_restart: '15 * * * *',   // every hour at :15 (after extract has run)
       max_restarts: 0,
       min_uptime: '10s',
       watch: false,
@@ -138,7 +147,8 @@ module.exports = {
       name: 'decoded-critique',
       cwd: '/Users/whit/Projects/Decoded',
       script: '/Users/whit/Projects/Decoded/.venv/bin/python',
-      args: '-m decoded.critique.worker --limit 50 --daily-budget 2 --total-budget 2',
+      // Full throughput: 200 briefs/run, $5/day budget, runs every 4 hours.
+      args: '-m decoded.critique.worker --limit 200 --daily-budget 5 --total-budget 5',
       interpreter: 'none',
       env: {
         PYTHONPATH: '/Users/whit/Projects/Decoded',
@@ -150,6 +160,7 @@ module.exports = {
         REDIS_URL: 'redis://localhost:6379/0',
       },
       autorestart: false,
+      cron_restart: '30 */4 * * *',  // every 4 hours at :30
       max_restarts: 0,
       min_uptime: '10s',
       watch: false,

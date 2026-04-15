@@ -520,9 +520,13 @@ def _bridge_connection(conn, row: dict, dry_run: bool = False) -> tuple[bool, bo
 
     if should_signal and not dry_run:
         # Count related KB entries for enriched payload
-        related_count = _count_related_kb_entries(
-            conn, row.get("paper_a_doi"), row.get("paper_b_doi")
-        )
+        try:
+            related_count = _count_related_kb_entries(
+                conn, row.get("paper_a_doi"), row.get("paper_b_doi")
+            )
+        except Exception as _rc_exc:
+            logger.warning("Could not count related KB entries: %s", _rc_exc, exc_info=True)
+            related_count = 0
 
         # Count supporting evidence papers
         evidence_count = 0
@@ -743,7 +747,7 @@ def run_batch_bridge(
                     )
             except Exception as e:
                 msg = f"Error bridging connection {conn_row.get('id')}: {e}"
-                logger.error(msg)
+                logger.error(msg, exc_info=True)
                 stats.errors.append(msg)
 
         # 4. Commit
