@@ -189,6 +189,52 @@ def store_extraction(conn, result, paper_id: str):
     conn.commit()
 
 
+def _sync_claims_to_table(cur, paper_id: str, result) -> int:
+    """Upsert claims from extraction result into the claims table.
+
+    Returns the number of claims written. Safe to call multiple times —
+    ON CONFLICT uses the (paper_id, text_hash) unique index.
+    """
+    written = 0
+    for claim in result.claims:
+        text = claim.text.strip() if claim.text else ""
+        if not text:
+            continue
+        ops = claim.operations if claim.operations else []
+        cur.execute(
+            """
+            INSERT INTO claims (
+                paper_id, text, claim_type, evidence_strength, confidence,
+                subject, predicate, object, operations
+            ) VALUES (
+                %s, %s, %s, %s, %s,
+                %s, %s, %s, %s
+            )
+            ON CONFLICT (paper_id, text_hash) DO UPDATE SET
+                claim_type = EXCLUDED.claim_type,
+                evidence_strength = EXCLUDED.evidence_strength,
+                confidence = EXCLUDED.confidence,
+                subject = EXCLUDED.subject,
+                predicate = EXCLUDED.predicate,
+                object = EXCLUDED.object,
+                operations = EXCLUDED.operations
+            """,
+            (
+                str(paper_id),
+                text,
+                claim.claim_type,
+                claim.evidence_strength,
+                claim.confidence,
+                claim.subject,
+                claim.predicate,
+                getattr(claim, "object", None),
+                ops,
+            ),
+        )
+        written += 1
+    return written
+
+
 def mark_error(conn, paper_id: str, error: str):
     cur = conn.cursor()
     cur.execute(
