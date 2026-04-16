@@ -140,7 +140,10 @@ def _get_today_spend_from_db(task: str | None = None) -> float:
 
 
 def _redis_daily_key(task: str | None = None) -> str:
-    date = datetime.utcnow().strftime("%Y-%m-%d")
+    # Use local date (not UTC) to match PostgreSQL's CURRENT_DATE (which uses server local time).
+    # Using UTC caused a mismatch: evening extractions (local) fell on the next UTC day, so
+    # the Redis key accumulated $50 before local midnight, blocking the next local day's work.
+    date = datetime.now().strftime("%Y-%m-%d")
     if task:
         return f"{_REDIS_DAILY_KEY_PREFIX}{task}:{date}"
     return _REDIS_DAILY_KEY_PREFIX + date
