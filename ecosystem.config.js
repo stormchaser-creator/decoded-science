@@ -60,11 +60,13 @@ module.exports = {
       name: 'decoded-extract',
       cwd: '/Users/whit/Projects/Decoded',
       script: '/Users/whit/Projects/Decoded/.venv/bin/python',
-      // Full throughput: 10 concurrent, 5000/batch, $50/day budget.
-      // Worker exits after each batch; PM2 restarts after restart_delay.
-      // When daily budget is hit, worker returns total=0 → sleeps DECODE_EMPTY_BACKOFF
-      // (1 hour) before exit, so restarts don't hammer the API.
-      args: '-m decoded.extract.worker --limit 5000 --concurrency 10 --daily-budget 50 --total-budget 50',
+      // Paced throughput: 3 concurrent, 50/batch, $50/day budget.
+      // 50 papers × ~$0.011 = ~$0.55/batch. At 15-min restart_delay:
+      //   ~3 batches/hr × $0.55 = ~$1.65/hr → $50 spread over ~30 hours.
+      // This keeps extraction flowing all day instead of exhausting budget by 9:30 AM.
+      // connect/critique budgets are now tracked independently (per-task) so they
+      // are never blocked by extract's spend.
+      args: '-m decoded.extract.worker --limit 50 --concurrency 3 --daily-budget 50 --total-budget 50',
       interpreter: 'none',
       env: {
         PYTHONPATH: '/Users/whit/Projects/Decoded',
@@ -79,7 +81,7 @@ module.exports = {
       },
       autorestart: true,      // continuously process — budget check prevents tight loops
       max_restarts: 500,
-      restart_delay: 30000,   // 30s between restarts
+      restart_delay: 900000,  // 15 min between batches — paces $50/day over ~30 hours
       min_uptime: '10s',
       watch: false,
       max_memory_restart: '512M',

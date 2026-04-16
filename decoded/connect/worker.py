@@ -182,7 +182,8 @@ class ConnectionWorker:
         self.limit = limit
         self.phases = phases or ["graph", "embedding", "llm"]
         self.cost_tracker = CostTracker(
-            CostBudget(daily_limit_usd=daily_budget_usd, total_limit_usd=total_budget_usd)
+            CostBudget(daily_limit_usd=daily_budget_usd, total_limit_usd=total_budget_usd),
+            task="connect",
         )
         self._neo4j = (neo4j_uri, neo4j_user, neo4j_password)
 
@@ -360,7 +361,7 @@ class BridgeQueryWorker:
     ):
         self._neo4j = (neo4j_uri, neo4j_user, neo4j_password)
         self._conn = get_db_conn()
-        self._cost_tracker = CostTracker()
+        self._cost_tracker = CostTracker(task="connect")
 
     def query(
         self,

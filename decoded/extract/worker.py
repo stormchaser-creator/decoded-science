@@ -227,7 +227,8 @@ class ExtractionWorker:
         self.paper_id = paper_id
         self.extractor = PaperExtractor(model_id=model_id)
         self.cost_tracker = CostTracker(
-            CostBudget(daily_limit_usd=daily_budget_usd, total_limit_usd=total_budget_usd)
+            CostBudget(daily_limit_usd=daily_budget_usd, total_limit_usd=total_budget_usd),
+            task="extract",
         )
 
     def run(self) -> dict[str, Any]:

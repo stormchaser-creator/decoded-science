@@ -157,7 +157,8 @@ class CritiqueWorker:
         self.min_connections = min_connections
         self.paper_id = paper_id
         self.cost_tracker = CostTracker(
-            CostBudget(daily_limit_usd=daily_budget_usd, total_limit_usd=total_budget_usd)
+            CostBudget(daily_limit_usd=daily_budget_usd, total_limit_usd=total_budget_usd),
+            task="critique",
         )
 
     def run(self) -> dict[str, Any]:

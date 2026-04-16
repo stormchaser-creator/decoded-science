@@ -48,7 +48,7 @@ MODEL_PRICING: dict[str, TokenPrice] = {
 # Fallback for unknown models
 _DEFAULT_PRICING = TokenPrice(3.00, 15.00)
 
-# Redis key for global daily spend (shared across all workers)
+# Redis key prefix for per-task daily spend
 _REDIS_DAILY_KEY_PREFIX = "decoded:daily_cost:"
 
 
@@ -88,25 +88,49 @@ def _get_redis():
         return None
 
 
-def _get_today_spend_from_db() -> float:
-    """Query PostgreSQL for today's total LLM spend across all tables."""
+def _get_today_spend_from_db(task: str | None = None) -> float:
+    """Query PostgreSQL for today's LLM spend.
+
+    When *task* is provided, only that task's table is queried so each worker
+    tracks its own budget independently.  When task is None, all tables are
+    summed (used for reporting only).
+    """
     try:
         import psycopg2
         db_url = os.environ.get("DATABASE_URL", "postgresql://localhost/decoded")
         conn = psycopg2.connect(db_url)
         cur = conn.cursor()
-        cur.execute("""
-            SELECT COALESCE(SUM(cost), 0) FROM (
-                SELECT cost_usd AS cost FROM extraction_results
-                    WHERE DATE(created_at) = CURRENT_DATE AND cost_usd > 0
-                UNION ALL
-                SELECT cost_usd FROM discovered_connections
-                    WHERE DATE(created_at) = CURRENT_DATE AND cost_usd > 0
-                UNION ALL
-                SELECT cost_usd FROM paper_critiques
-                    WHERE DATE(created_at) = CURRENT_DATE AND cost_usd > 0
-            ) t
-        """)
+
+        if task == "extract":
+            cur.execute("""
+                SELECT COALESCE(SUM(cost_usd), 0) FROM extraction_results
+                WHERE DATE(created_at) = CURRENT_DATE AND cost_usd > 0
+            """)
+        elif task == "connect":
+            cur.execute("""
+                SELECT COALESCE(SUM(cost_usd), 0) FROM discovered_connections
+                WHERE DATE(created_at) = CURRENT_DATE AND cost_usd > 0
+            """)
+        elif task == "critique":
+            cur.execute("""
+                SELECT COALESCE(SUM(cost_usd), 0) FROM paper_critiques
+                WHERE DATE(created_at) = CURRENT_DATE AND cost_usd > 0
+            """)
+        else:
+            # Global fallback: sum all tasks (used when task is unknown/None)
+            cur.execute("""
+                SELECT COALESCE(SUM(cost), 0) FROM (
+                    SELECT cost_usd AS cost FROM extraction_results
+                        WHERE DATE(created_at) = CURRENT_DATE AND cost_usd > 0
+                    UNION ALL
+                    SELECT cost_usd FROM discovered_connections
+                        WHERE DATE(created_at) = CURRENT_DATE AND cost_usd > 0
+                    UNION ALL
+                    SELECT cost_usd FROM paper_critiques
+                        WHERE DATE(created_at) = CURRENT_DATE AND cost_usd > 0
+                ) t
+            """)
+
         total = float(cur.fetchone()[0])
         conn.close()
         return total
@@ -115,8 +139,11 @@ def _get_today_spend_from_db() -> float:
         return 0.0
 
 
-def _redis_daily_key() -> str:
-    return _REDIS_DAILY_KEY_PREFIX + datetime.utcnow().strftime("%Y-%m-%d")
+def _redis_daily_key(task: str | None = None) -> str:
+    date = datetime.utcnow().strftime("%Y-%m-%d")
+    if task:
+        return f"{_REDIS_DAILY_KEY_PREFIX}{task}:{date}"
+    return _REDIS_DAILY_KEY_PREFIX + date
 
 
 # ---------------------------------------------------------------------------
@@ -132,13 +159,19 @@ class CostBudget:
 class CostTracker:
     """Thread-safe accumulator for LLM spend with persistent budget enforcement.
 
+    Pass *task* (e.g. "extract", "connect", "critique") so each worker tracks
+    its own daily spend independently.  Without a task, the global sum of all
+    workers is used — which causes workers to block each other when any single
+    worker exhausts the full pipeline budget.
+
     On init, reads today's actual spend from PostgreSQL so budget limits
-    survive process restarts.  Each record() call also increments a Redis
-    counter so all workers share a single daily total.
+    survive process restarts.  Each record() call also increments a task-scoped
+    Redis counter for fast inter-process coordination.
     """
 
-    def __init__(self, budget: CostBudget | None = None):
+    def __init__(self, budget: CostBudget | None = None, task: str | None = None):
         self._budget = budget or CostBudget()
+        self._task = task  # None → global (legacy behaviour)
         self._lock = threading.Lock()
         self._records: list[CostRecord] = []
         self._session_usd: float = 0.0       # this process only
@@ -146,10 +179,11 @@ class CostTracker:
         self._by_task: dict[str, float] = {}
         self._redis = _get_redis()
 
-        # Seed from DB so we know what was already spent today
-        self._prior_today_usd = _get_today_spend_from_db()
+        # Seed from DB so we know what was already spent today (task-scoped)
+        self._prior_today_usd = _get_today_spend_from_db(task=self._task)
         logger.info(
             "cost_tracker_init",
+            task=self._task or "global",
             prior_today_usd=round(self._prior_today_usd, 2),
             daily_limit=self._budget.daily_limit_usd,
             total_limit=self._budget.total_limit_usd,
@@ -158,7 +192,7 @@ class CostTracker:
         # Sync Redis counter to DB truth (if Redis is behind)
         if self._redis:
             try:
-                key = _redis_daily_key()
+                key = _redis_daily_key(self._task)
                 current = float(self._redis.get(key) or 0)
                 if current < self._prior_today_usd:
                     # Redis is behind (maybe it was flushed) — set to DB value
@@ -194,10 +228,12 @@ class CostTracker:
             self._by_model[model_id] = self._by_model.get(model_id, 0.0) + cost
             self._by_task[task] = self._by_task.get(task, 0.0) + cost
 
-        # Atomically increment Redis daily counter
+        # Atomically increment task-scoped Redis daily counter
         if self._redis:
             try:
-                self._redis.incrbyfloat(_redis_daily_key(), cost)
+                key = _redis_daily_key(self._task)
+                self._redis.incrbyfloat(key, cost)
+                self._redis.expire(key, 90000)  # renew TTL ~25h
             except Exception:
                 pass  # Redis failure is non-fatal; DB is truth
 
@@ -219,11 +255,11 @@ class CostTracker:
 
     @property
     def today_usd(self) -> float:
-        """Today's total spend: prior (from DB at init) + this session."""
-        # Try Redis first (includes all workers)
+        """Today's spend for this task: prior (from DB at init) + this session."""
+        # Try task-scoped Redis key first
         if self._redis:
             try:
-                val = self._redis.get(_redis_daily_key())
+                val = self._redis.get(_redis_daily_key(self._task))
                 if val is not None:
                     return float(val)
             except Exception:
