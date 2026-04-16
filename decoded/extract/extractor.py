@@ -173,27 +173,48 @@ class PaperExtractor:
                 result["entities"].append({"type": etype, "text": name, "confidence": conf})
 
         # Claims (with LLM-provided confidence)
+        # New (2026-04-15): parse subject/predicate/object attributes and operations.
+        # The text is now in a <text> sub-element; fall back to el.text for old format.
         result["claims"] = []
         for el in root.findall(".//claims/claim"):
             claim_type = el.get("type", "descriptive")
             strength = el.get("strength", "moderate")
             conf = el.get("confidence", "0.5")
-            text_val = el.text.strip() if el.text else ""
+            subject = el.get("subject") or None
+            predicate = el.get("predicate") or None
+            obj = el.get("object") or None
+            ops_str = el.get("operations", "")
+            operations = [o.strip() for o in ops_str.split(",") if o.strip()]
+
+            # Text: prefer <text> sub-element, fall back to el.text
+            text_el = el.find("text")
+            if text_el is not None and text_el.text:
+                text_val = text_el.text.strip()
+            else:
+                text_val = el.text.strip() if el.text else ""
+
             if text_val:
                 result["claims"].append({
                     "type": claim_type,
                     "strength": strength,
                     "text": text_val,
                     "confidence": conf,
+                    "subject": subject,
+                    "predicate": predicate,
+                    "object": obj,
+                    "operations": operations,
                 })
 
         # Mechanisms (with LLM-provided confidence)
+        # New (2026-04-15): parse pathway and context sub-elements.
         result["mechanisms"] = []
         for el in root.findall(".//mechanisms/mechanism"):
             desc_el = el.find("description")
             up_el = el.find("upstream")
             down_el = el.find("downstream")
             int_el = el.find("interaction")
+            pathway_el = el.find("pathway")
+            context_el = el.find("context")
             conf = el.get("confidence", "0.5")
             desc = desc_el.text.strip() if desc_el is not None and desc_el.text else ""
             if desc:
@@ -202,8 +223,41 @@ class PaperExtractor:
                     "upstream": up_el.text.strip() if up_el is not None and up_el.text else None,
                     "downstream": down_el.text.strip() if down_el is not None and down_el.text else None,
                     "interaction": int_el.text.strip() if int_el is not None and int_el.text else None,
+                    "pathway": pathway_el.text.strip() if pathway_el is not None and pathway_el.text else None,
+                    "context": context_el.text.strip() if context_el is not None and context_el.text else None,
                     "confidence": conf,
                 })
+
+        # Paper-level operation tagging (new 2026-04-15)
+        op_el = root.find("operation")
+        if op_el is not None:
+            primary_el = op_el.find("primary")
+            secondary_el = op_el.find("secondary")
+            op_conf_el = op_el.find("confidence")
+            op_reason_el = op_el.find("reasoning")
+
+            primary_op = primary_el.text.strip() if primary_el is not None and primary_el.text else None
+            sec_raw = secondary_el.text.strip() if secondary_el is not None and secondary_el.text else ""
+            secondary_ops = [o.strip() for o in sec_raw.split(",") if o.strip()]
+            try:
+                op_conf = float(op_conf_el.text.strip()) if op_conf_el is not None and op_conf_el.text else None
+            except (ValueError, TypeError):
+                op_conf = None
+            op_reason = op_reason_el.text.strip() if op_reason_el is not None and op_reason_el.text else None
+
+            _valid_ops = {
+                'Reception', 'Transduction', 'Conduction', 'Regulation',
+                'Synthesis', 'Defense', 'Restoration', 'Elimination',
+            }
+            result["primary_operation"] = primary_op if primary_op in _valid_ops else None
+            result["secondary_operations"] = [o for o in secondary_ops if o in _valid_ops]
+            result["operation_confidence"] = op_conf
+            result["operation_reasoning"] = op_reason
+        else:
+            result["primary_operation"] = None
+            result["secondary_operations"] = []
+            result["operation_confidence"] = None
+            result["operation_reasoning"] = None
 
         # Methods
         result["methods"] = []
@@ -271,23 +325,31 @@ class PaperExtractor:
         ]
 
         # Claims — use LLM-provided confidence, fallback to 0.5
+        # New (2026-04-15): include subject/predicate/object/operations
         claims = [
             ExtractedClaim(
                 text=c["text"],
                 claim_type=c.get("type", "descriptive"),
+                subject=c.get("subject"),
+                predicate=c.get("predicate"),
+                object=c.get("object"),
                 evidence_strength=c.get("strength", "moderate"),
                 confidence=min(1.0, max(0.0, float(c.get("confidence", 0.5)))),
+                operations=c.get("operations", []),
             )
             for c in parsed.get("claims", [])
         ]
 
         # Mechanisms — use LLM-provided confidence, fallback to 0.5
+        # New (2026-04-15): include pathway and context
         mechanisms = [
             ExtractedMechanism(
                 description=m["description"],
                 upstream_entity=m.get("upstream"),
                 downstream_entity=m.get("downstream"),
                 interaction_type=m.get("interaction"),
+                pathway=m.get("pathway"),
+                context=m.get("context"),
                 confidence=min(1.0, max(0.0, float(m.get("confidence", 0.5)))),
             )
             for m in parsed.get("mechanisms", [])
@@ -326,6 +388,10 @@ class PaperExtractor:
             limitations=parsed.get("limitations", []),
             funding_sources=[parsed["funding"]] if clean(parsed.get("funding")) else [],
             conflicts_of_interest=clean(parsed.get("conflicts")),
+            primary_operation=parsed.get("primary_operation"),
+            secondary_operations=parsed.get("secondary_operations", []),
+            operation_confidence=parsed.get("operation_confidence"),
+            operation_reasoning=clean(parsed.get("operation_reasoning")),
             prompt_tokens=input_tokens,
             completion_tokens=output_tokens,
             cost_usd=cost,

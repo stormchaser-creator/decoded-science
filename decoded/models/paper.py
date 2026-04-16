@@ -108,6 +108,7 @@ class ExtractedClaim(BaseModel):
     evidence_strength: str | None = None  # "strong", "moderate", "weak"
     confidence: float = Field(ge=0.0, le=1.0, default=1.0)
     section: str | None = None  # "abstract", "results", "discussion"
+    operations: list[str] = Field(default_factory=list)  # e.g. ["Regulation", "Synthesis"]
 
 
 class ExtractedMechanism(BaseModel):
@@ -159,6 +160,11 @@ class ExtractionResult(BaseModel):
     funding_sources: list[str] = Field(default_factory=list)
     conflicts_of_interest: str | None = None
     embedding: list[float] | None = None  # vector for similarity search
+    # Operation tagging (Pearl audit 2026-04-15)
+    primary_operation: str | None = None   # e.g. "Regulation"
+    secondary_operations: list[str] = Field(default_factory=list)  # e.g. ["Synthesis", "Defense"]
+    operation_confidence: float | None = None
+    operation_reasoning: str | None = None
     prompt_tokens: int = 0
     completion_tokens: int = 0
     cost_usd: float = 0.0

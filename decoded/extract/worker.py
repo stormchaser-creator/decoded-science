@@ -107,7 +107,11 @@ def mark_extracting(conn, paper_id: str):
 
 
 def store_extraction(conn, result, paper_id: str):
-    """Insert extraction result and update paper status."""
+    """Insert extraction result and update paper status.
+
+    Stores enriched claims (with subject/predicate/object/operations) into
+    extraction_results AND syncs them to the claims table for indexed queries.
+    """
     cur = conn.cursor()
 
     def jsonify(obj) -> str:
@@ -118,6 +122,9 @@ def store_extraction(conn, result, paper_id: str):
             ])
         return json.dumps(obj)
 
+    # Get the extraction result UUID (needed for upsert return)
+    extraction_id = str(result.id)
+
     cur.execute(
         """
         INSERT INTO extraction_results (
@@ -126,12 +133,14 @@ def store_extraction(conn, result, paper_id: str):
             primary_outcome, secondary_outcomes,
             entities, claims, mechanisms, methods,
             key_findings, limitations, funding_sources, conflicts_of_interest,
+            primary_operation, secondary_operations, operation_confidence, operation_reasoning,
             prompt_tokens, completion_tokens, cost_usd,
             created_at
         ) VALUES (
             %s, %s, %s,
             %s, %s, %s, %s, %s,
             %s, %s,
+            %s, %s, %s, %s,
             %s, %s, %s, %s,
             %s, %s, %s, %s,
             %s, %s, %s,
@@ -153,12 +162,17 @@ def store_extraction(conn, result, paper_id: str):
             limitations = EXCLUDED.limitations,
             funding_sources = EXCLUDED.funding_sources,
             conflicts_of_interest = EXCLUDED.conflicts_of_interest,
+            primary_operation = EXCLUDED.primary_operation,
+            secondary_operations = EXCLUDED.secondary_operations,
+            operation_confidence = EXCLUDED.operation_confidence,
+            operation_reasoning = EXCLUDED.operation_reasoning,
             prompt_tokens = EXCLUDED.prompt_tokens,
             completion_tokens = EXCLUDED.completion_tokens,
             cost_usd = EXCLUDED.cost_usd
+        RETURNING id
         """,
         (
-            str(result.id),
+            extraction_id,
             str(paper_id),
             result.model_id,
             result.study_design if isinstance(result.study_design, str) else result.study_design.value,
@@ -176,16 +190,27 @@ def store_extraction(conn, result, paper_id: str):
             json.dumps(result.limitations),
             json.dumps(result.funding_sources),
             result.conflicts_of_interest,
+            result.primary_operation,
+            result.secondary_operations if result.secondary_operations else [],
+            result.operation_confidence,
+            result.operation_reasoning,
             result.prompt_tokens,
             result.completion_tokens,
             result.cost_usd,
         ),
     )
+    row = cur.fetchone()
+    stored_extraction_id = str(row[0]) if row else extraction_id
 
     cur.execute(
         "UPDATE raw_papers SET status='extracted', updated_at=NOW() WHERE id=%s",
         (str(paper_id),),
     )
+
+    # Sync claims to the claims table with typed triple fields + operation tags.
+    # Uses unique index on (paper_id, text_hash) for idempotent upserts.
+    _sync_claims_to_table(cur, paper_id=paper_id, result=result)
+
     conn.commit()
 
 

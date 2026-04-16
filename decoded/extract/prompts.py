@@ -2,11 +2,41 @@
 
 Uses structured XML output for reliable parsing without requiring
 JSON mode (which can fail on long responses).
+
+2026-04-15 update (Pearl audit): Added typed claim triples (subject/predicate/object),
+per-claim operation tags, mechanism pathway/context, and paper-level operation tagging.
+Subject/predicate/object were 100% NULL before — the prompt now enforces them.
 """
 
 from __future__ import annotations
 
 SYSTEM_PROMPT = """You are a precision biomedical literature analyst. Your job is to extract structured information from scientific papers with high accuracy. Be concise, factual, and direct. Only include information explicitly stated in the paper — do not infer or speculate.
+
+THE 8 BIOLOGICAL OPERATIONS (use this taxonomy for all operation fields):
+- Reception: sensory input, signal detection, receptor binding, ligand-receptor interactions, ion channels
+- Transduction: signal conversion, second messengers, kinase cascades, GPCR signaling, phosphorylation cascades
+- Conduction: transmission, propagation, neural conduction, action potentials, gap junctions, axonal transport
+- Regulation: homeostasis, feedback loops, circadian rhythms, set points, allostasis, transcription factor control
+- Synthesis: protein synthesis, anabolism, biosynthesis, growth, constructive metabolism, mRNA translation
+- Defense: immune response, inflammation, apoptosis, DNA repair, antioxidant response, pathogen clearance
+- Restoration: recovery, sleep, autophagy, cellular repair, regeneration, tissue healing, mitophagy
+- Elimination: detoxification, apoptosis execution, waste removal, proteolysis, autophagy flux, excretion
+
+CLAIM EXTRACTION RULES:
+- You MUST fill subject, predicate, and object as separate XML attributes for each claim.
+- subject: ONE entity making or experiencing the claim (not a sentence — one noun)
+- predicate: ONE verb from this list: activates, inhibits, upregulates, downregulates, is_biomarker_for, predicts, correlates_with, requires, blocks, induces, rescues, is_upstream_of, is_downstream_of, compensates_for
+- object: ONE entity being affected (not a list — one noun)
+- If you cannot identify a clear subject+predicate+object, do not extract this as a claim.
+- operations: comma-separated list of operations this claim touches (use the 8 Operations above). Most claims touch 1; cross-operation claims (touching 2+) are especially valuable.
+
+MECHANISM EXTRACTION RULES:
+- One row per step — do not combine multiple effects into one mechanism row.
+- upstream: ONE entity (not a list)
+- interaction: ONE verb (not "activates|inhibits" — pick the dominant one)
+- downstream: ONE entity (not a comma-separated list)
+- pathway: the named biological pathway if applicable (e.g., "mTORC1 pathway", "NF-κB cascade")
+- context: tissue or disease context if specified (e.g., "hepatocyte", "type 2 diabetes")
 
 Output ONLY the XML block. No prose before or after."""
 
@@ -78,20 +108,26 @@ Respond with ONLY this XML block (fill in all fields; use "unknown" if not deter
     <entity type="gene|protein|disease|drug|pathway|cell_type|organism|biomarker" confidence="0.0-1.0"><!-- name --></entity>
   </entities>
   <claims>
-    <!-- Up to 10 key scientific claims made in the paper -->
-    <!-- confidence: 0.9+ = directly stated with evidence, 0.7-0.89 = stated, 0.5-0.69 = implied, <0.5 = speculative -->
-    <claim type="causal|associative|null|mechanistic|descriptive" strength="strong|moderate|weak" confidence="0.0-1.0">
-      <!-- claim text (one sentence) -->
+    <!-- Up to 10 key scientific claims made in the paper. REQUIRED: fill subject, predicate, object attributes.
+         subject="ONE entity" predicate="ONE verb from controlled list" object="ONE entity"
+         operations="comma-separated list of 1-3 operations from the 8 Operations taxonomy"
+         Cross-operation claims (operations spanning 2+ entries) are especially valuable — tag them accurately. -->
+    <claim type="causal|associative|null|mechanistic|descriptive" strength="strong|moderate|weak" confidence="0.0-1.0"
+           subject="entity-name" predicate="activates|inhibits|upregulates|downregulates|is_biomarker_for|predicts|correlates_with|requires|blocks|induces|rescues|is_upstream_of|is_downstream_of|compensates_for" object="entity-name"
+           operations="Operation1,Operation2">
+      <text><!-- claim text (one sentence, complete and human-readable) --></text>
     </claim>
   </claims>
   <mechanisms>
-    <!-- Up to 5 biological mechanisms described -->
+    <!-- Up to 5 biological mechanisms. ONE upstream, ONE interaction, ONE downstream per mechanism. -->
     <!-- confidence: 0.9+ = fully described, 0.7-0.89 = partially described, <0.7 = inferred -->
     <mechanism confidence="0.0-1.0">
       <description><!-- brief mechanism description --></description>
-      <upstream><!-- upstream entity/trigger, or null --></upstream>
-      <downstream><!-- downstream entity/effect, or null --></downstream>
-      <interaction><!-- activates|inhibits|binds|regulates|phosphorylates|cleaves|other --></interaction>
+      <upstream><!-- ONE upstream entity/trigger --></upstream>
+      <downstream><!-- ONE downstream entity/effect --></downstream>
+      <interaction><!-- activates|inhibits|phosphorylates|ubiquitinates|transcribes|translates|cleaves|recruits|releases|sequesters|stabilizes|degrades|regulates|binds|other --></interaction>
+      <pathway><!-- named pathway if applicable, e.g. "mTORC1 pathway", or null --></pathway>
+      <context><!-- tissue/disease context if specified, e.g. "hepatocyte", or null --></context>
     </mechanism>
   </mechanisms>
   <methods>
@@ -104,4 +140,11 @@ Respond with ONLY this XML block (fill in all fields; use "unknown" if not deter
   </limitations>
   <funding><!-- funding source(s), or null --></funding>
   <conflicts><!-- conflicts of interest statement, or null --></conflicts>
+  <operation>
+    <!-- Primary biological operation this paper investigates (from the 8 Operations taxonomy) -->
+    <primary><!-- Reception|Transduction|Conduction|Regulation|Synthesis|Defense|Restoration|Elimination --></primary>
+    <secondary><!-- comma-separated secondary operations if paper spans multiple, or empty --></secondary>
+    <confidence><!-- 0.0-1.0 confidence in this assignment --></confidence>
+    <reasoning><!-- one sentence explaining why this operation was assigned --></reasoning>
+  </operation>
 </extraction>"""
