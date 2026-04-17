@@ -120,30 +120,43 @@ def ensure_schema(cur) -> None:
 # fall back to the raw string.
 
 AGGREGATE_FROM_TRIPLES = """
+-- SPRINT G: aggregation now uses triple_entity_mentions to expand prose
+-- objects into canonical-entity cross-products. A triple like
+--   CCM1 → induces → "Oxidative stress and inflammatory response"
+-- becomes TWO entity_edges:
+--   CCM1 → induces → Oxidative stress
+--   CCM1 → induces → Inflammation
+-- because Oxidative stress AND Inflammation are both canonical entities
+-- that appear as whole-word substrings in the object prose.
+--
+-- Coverage: a triple that has entity mentions on BOTH subject and object
+-- side produces cross-product edges. Triples with no mentions on either
+-- side fall through the expansion table and are NOT represented as edges
+-- (they stay in paper_claim_triples as raw evidence for later discovery).
 WITH resolved AS (
+    -- Expansion-based pairs: use triple_entity_mentions to find every
+    -- (subject_entity × object_entity) pairing per triple.
     SELECT
         pct.paper_id,
         pct.predicate_type,
         pct.direction,
         pct.primary_operation AS paper_operation,
         pct.confidence,
-        -- Prefer canonical name when normalization succeeded
-        ce_subj.id                                          AS source_entity_id,
-        COALESCE(ce_subj.canonical_name, pct.subject)       AS source_entity_name,
-        ce_obj.id                                           AS target_entity_id,
-        COALESCE(ce_obj.canonical_name, pct.object)         AS target_entity_name,
-        ce_subj.primary_operation                           AS source_entity_op,
-        ce_obj.primary_operation                            AS target_entity_op
+        s_ce.id                    AS source_entity_id,
+        s_ce.canonical_name        AS source_entity_name,
+        o_ce.id                    AS target_entity_id,
+        o_ce.canonical_name        AS target_entity_name,
+        s_ce.primary_operation     AS source_entity_op,
+        o_ce.primary_operation     AS target_entity_op
     FROM paper_claim_triples pct
-    LEFT JOIN canonical_entities ce_subj
-      ON ce_subj.id::text = pct.subject_normalized_id
-    LEFT JOIN canonical_entities ce_obj
-      ON ce_obj.id::text = pct.object_normalized_id
-    WHERE pct.subject IS NOT NULL
-      AND pct.object IS NOT NULL
-      AND pct.predicate_type IS NOT NULL
-      AND length(pct.subject) > 1
-      AND length(pct.object) > 1
+    JOIN triple_entity_mentions s_tem
+      ON s_tem.triple_id = pct.id AND s_tem.role = 'subject'
+    JOIN triple_entity_mentions o_tem
+      ON o_tem.triple_id = pct.id AND o_tem.role = 'object'
+    JOIN canonical_entities s_ce ON s_ce.id = s_tem.entity_id
+    JOIN canonical_entities o_ce ON o_ce.id = o_tem.entity_id
+    WHERE pct.predicate_type IS NOT NULL
+      AND s_ce.id <> o_ce.id   -- no self-loops
 ),
 triple_edges AS (
     SELECT
@@ -322,6 +335,15 @@ def run(dry_run: bool, min_support: int) -> None:
                 return
 
             # 2. Literature edges from paper_claim_triples
+            #   Clear stale literature edges first — the expansion-based build
+            #   produces canonical-only edges, so legacy prose-string edges
+            #   from pre-Sprint-G builds need to be purged or they clutter the
+            #   graph with dead-end nodes like "Perturbed progesterone
+            #   signaling, blood-brain barrier dysfunction, vascular malformation".
+            log.info("Clearing stale literature edges…")
+            cur.execute("DELETE FROM entity_edges WHERE edge_source = 'literature'")
+            stats["stale_literature_deleted"] = cur.rowcount
+
             log.info("Aggregating literature edges from paper_claim_triples (min_support=%s)…",
                      min_support)
             cur.execute(AGGREGATE_FROM_TRIPLES, {"min_support": min_support})

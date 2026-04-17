@@ -33,6 +33,9 @@ while true; do
     echo "$LOG_PREFIX normalize_entities.py"
     $PY scripts/normalize_entities.py 2>&1 | tail -6
 
+    echo "$LOG_PREFIX expand_entity_mentions.py --only-new"
+    $PY scripts/expand_entity_mentions.py --only-new 2>&1 | tail -6
+
     echo "$LOG_PREFIX build_entity_edges.py"
     $PY scripts/build_entity_edges.py --min-support 1 2>&1 | tail -8
 
