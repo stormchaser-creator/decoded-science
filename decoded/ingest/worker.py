@@ -100,48 +100,67 @@ def upsert_paper(conn, record: dict[str, Any], run_id: str) -> tuple[str, bool]:
 
     paper_id = str(uuid.uuid4())
 
-    cur.execute(
-        """
-        INSERT INTO raw_papers (
-            id, source, external_id, title, abstract, authors, journal,
-            published_date, pub_year, doi, pmc_id, mesh_terms, keywords,
-            status, ingest_run_id, raw_metadata, sections, reference_count,
-            references_list, created_at, updated_at
-        ) VALUES (
-            %s, %s, %s, %s, %s, %s, %s,
-            %s, %s, %s, %s, %s, %s,
-            'queued', %s, %s, %s, %s,
-            %s, NOW(), NOW()
+    # SAVEPOINT wrapper — a single paper's unique-constraint collision
+    # (e.g. source+title duplicate) should not abort the whole ingest run.
+    import psycopg2.errors as _pgerr
+    cur.execute("SAVEPOINT sp_upsert_paper")
+    try:
+        cur.execute(
+            """
+            INSERT INTO raw_papers (
+                id, source, external_id, title, abstract, authors, journal,
+                published_date, pub_year, doi, pmc_id, mesh_terms, keywords,
+                status, ingest_run_id, raw_metadata, sections, reference_count,
+                references_list, created_at, updated_at
+            ) VALUES (
+                %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s, %s,
+                'queued', %s, %s, %s, %s,
+                %s, NOW(), NOW()
+            )
+            ON CONFLICT (source, external_id) DO NOTHING
+            RETURNING id
+            """,
+            (
+                paper_id,
+                source,
+                external_id,
+                record.get("title", "")[:2000],
+                record.get("abstract"),
+                json.dumps(record.get("authors", [])),
+                record.get("journal"),
+                pub_date_obj,
+                pub_year,
+                record.get("doi"),
+                record.get("pmc_id"),
+                json.dumps(record.get("mesh_terms", [])),
+                json.dumps(record.get("keywords", [])),
+                run_id,
+                json.dumps(record.get("raw_metadata", {})),
+                json.dumps({}),
+                None,
+                json.dumps([]),
+            ),
         )
-        ON CONFLICT (source, external_id) DO NOTHING
-        RETURNING id
-        """,
-        (
-            paper_id,
-            source,
-            external_id,
-            record.get("title", "")[:2000],
-            record.get("abstract"),
-            json.dumps(record.get("authors", [])),
-            record.get("journal"),
-            pub_date_obj,
-            pub_year,
-            record.get("doi"),
-            record.get("pmc_id"),
-            json.dumps(record.get("mesh_terms", [])),
-            json.dumps(record.get("keywords", [])),
-            run_id,
-            json.dumps(record.get("raw_metadata", {})),
-            json.dumps({}),
-            None,
-            json.dumps([]),
-        ),
-    )
-    row = cur.fetchone()
-    conn.commit()
-    if row:
-        return str(row[0]), True
-    return paper_id, False
+        row = cur.fetchone()
+        cur.execute("RELEASE SAVEPOINT sp_upsert_paper")
+        conn.commit()
+        if row:
+            return str(row[0]), True
+        return paper_id, False
+    except _pgerr.UniqueViolation as e:
+        cur.execute("ROLLBACK TO SAVEPOINT sp_upsert_paper")
+        conn.commit()
+        logger.warning(
+            "upsert_paper UniqueViolation (skipping): source=%s external_id=%s title=%r %s",
+            source, external_id, (record.get("title") or "")[:80],
+            str(e).strip().split("\n")[0][:200],
+        )
+        return "", False
+    except Exception:
+        cur.execute("ROLLBACK TO SAVEPOINT sp_upsert_paper")
+        conn.commit()
+        raise
 
 
 def update_paper_fetched(conn, paper_id: str, pmc_id: str | None):
