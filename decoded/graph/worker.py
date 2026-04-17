@@ -77,15 +77,17 @@ def fetch_papers(conn, limit: int, paper_id: str | None = None) -> list[dict]:
     return [dict(r) for r in cur.fetchall()]
 
 
-def fetch_connections(conn) -> list[dict]:
-    """Fetch all discovered connections for graph edge creation."""
+def fetch_connections(conn, limit: int = 10_000) -> list[dict]:
+    """Fetch discovered connections for graph edge creation (capped to prevent OOM)."""
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     cur.execute(
         """
         SELECT id, paper_a_id, paper_b_id, connection_type, description, confidence
         FROM discovered_connections
         ORDER BY confidence DESC
-        """
+        LIMIT %s
+        """,
+        (limit,),
     )
     return [dict(r) for r in cur.fetchall()]
 
