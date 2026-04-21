@@ -158,14 +158,78 @@ def decompose_question(question_text: str) -> dict[str, Any]:
         except Exception as e:
             log.warning("Claude decomposition failed, falling back: %s", e)
 
-    # Fallback: extract obvious named entities + generic query expansion
-    words = question_text.split()
-    seeds = [w.strip("?.,") for w in words if (w[0].isupper() and len(w) > 2) or w.isupper()]
+    # ── Rule-based fallback (Claude unavailable) ──────────────────────
+    # The old fallback just grabbed capitalized words as seeds and left
+    # target_entities empty — which meant even successful seed resolution
+    # couldn't find paths (nothing to traverse toward). This upgraded
+    # fallback detects common biomedical question patterns and emits
+    # mechanistic targets + expanded queries.
+    import re as _re
+    q = question_text.strip("?.,").strip()
+    q_lower = q.lower()
+
+    # Pull capitalized tokens as candidate seeds (proper nouns, acronyms)
+    words = q.split()
+    seeds = [w.strip("?.,") for w in words if (len(w) > 2 and (w[0].isupper() or w.isupper()))]
+    # Fallback: if the question has no capitalized terms, grab the longest
+    # content noun phrase (rough heuristic).
+    if not seeds:
+        seeds = [q[:80]]
+
+    # Extract the "subject" of the question — the disease/entity the user
+    # is asking about. For "Glioblastoma multiforme how does it start" this
+    # is "glioblastoma multiforme"; we rebuild it from the leading
+    # capitalized run, stripping trailing interrogatives.
+    head_match = _re.match(r"^([A-Z][\w\s\-]{2,60}?)(?=\s+(?:how|why|what|when|where|can|does|do|is|are|which)\b|$)", q, flags=_re.IGNORECASE)
+    subject = (head_match.group(1).strip() if head_match else words[0]).rstrip(",.")
+
+    # Pattern detection → targets
+    targets: list[str] = []
+    pattern_note = ""
+    if _re.search(r"\bhow\s+does\s+\w.*\s+(start|begin|arise|form|develop|originate|emerge)\b", q_lower) or \
+       _re.search(r"\b(how|why)\s+.*\b(start|form|develop|arise|originate)\b", q_lower):
+        targets = [
+            f"{subject} pathogenesis",
+            f"{subject} initiation",
+            f"{subject} formation",
+            f"{subject} origin",
+        ]
+        pattern_note = "causal-initiation (how-does-X-start)"
+    elif _re.search(r"\bwhat\s+causes\b", q_lower) or _re.search(r"\bcause(s)?\s+of\b", q_lower):
+        targets = [f"{subject} etiology", f"{subject} pathogenesis", f"{subject} risk factors"]
+        pattern_note = "etiologic (what-causes-X)"
+    elif _re.search(r"\bhow\s+does\s+.*\s+(work|function|operate)\b", q_lower) or \
+         _re.search(r"\bmechanism\s+of\b", q_lower):
+        targets = [f"{subject} mechanism", f"{subject} pathway", f"{subject} signaling"]
+        pattern_note = "mechanistic (how-does-X-work)"
+    elif _re.search(r"\bhow\s+does\s+.*\s+(spread|metastasize|invade|progress)\b", q_lower) or \
+         _re.search(r"\bprogression\b", q_lower):
+        targets = [f"{subject} progression", f"{subject} metastasis", f"{subject} invasion"]
+        pattern_note = "progression"
+    # Fallback targets even when no pattern hits — traversal needs SOMETHING
+    if not targets:
+        targets = [f"{subject} pathogenesis", f"{subject} mechanism"]
+        pattern_note = pattern_note or "generic (no pattern match — default mechanistic targets)"
+
+    # Acquisition queries: combine subject with standard mechanistic keywords.
+    MECHANISM_TERMS = [
+        "pathogenesis", "mechanism", "etiology",
+        "molecular", "initiation", "cell of origin",
+        "signaling", "inflammation", "oxidative stress",
+    ]
+    acquisition_queries: list[str] = [q]  # original question as baseline query
+    for term in MECHANISM_TERMS[:6]:
+        acquisition_queries.append(f"{subject} {term}")
+
     return {
-        "seed_entities": seeds[:5] or [question_text.strip("?.,")[:80]],
-        "target_entities": [],
-        "acquisition_queries": [question_text],
-        "notes": "Rule-based fallback decomposition (no Claude available)",
+        "seed_entities": seeds[:5],
+        "target_entities": targets[:4],
+        "acquisition_queries": acquisition_queries[:8],
+        "notes": (
+            f"Rule-based fallback decomposition (no Claude available). "
+            f"Pattern: {pattern_note}. Subject extracted: '{subject}'. "
+            f"Targets synthesized from pattern; verify before acting on the hypothesis brief."
+        ),
     }
 
 

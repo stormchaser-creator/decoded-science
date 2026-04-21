@@ -139,23 +139,44 @@ RESOLVE_SEED_SQL = """
 WITH inputs AS (
     SELECT UNNEST(%s::text[]) AS seed
 )
+-- (1) Curated canonical match
 SELECT DISTINCT ce.canonical_name AS resolved_name
 FROM inputs i
 JOIN canonical_entities ce
     ON lower(ce.canonical_name) = lower(i.seed)
     OR lower(i.seed) = ANY(SELECT lower(a) FROM UNNEST(ce.aliases) a)
 UNION
--- Seeds that don't resolve — still usable against raw entity_edges names
-SELECT i.seed AS resolved_name
+-- (2) Any endpoint in the EXTENDED edge set (curated + triple-derived).
+-- The view entity_edges_extended unions entity_edges with
+-- paper_claim_triples; this lets emergent entities that don't have a
+-- hand-curated canonical row still resolve as long as they appear in
+-- some triple extracted from a real paper.
+SELECT DISTINCT i.seed AS resolved_name
 FROM inputs i
 WHERE NOT EXISTS (
     SELECT 1 FROM canonical_entities ce
     WHERE lower(ce.canonical_name) = lower(i.seed)
        OR lower(i.seed) = ANY(SELECT lower(a) FROM UNNEST(ce.aliases) a)
 ) AND EXISTS (
-    SELECT 1 FROM entity_edges ee
+    SELECT 1 FROM entity_edges_extended ee
     WHERE lower(ee.source_entity_name) = lower(i.seed)
        OR lower(ee.target_entity_name) = lower(i.seed)
+)
+UNION
+-- (3) Discovered-entity fallback. If glioblastoma is a known concept
+-- in discovered_entities (168 papers) but hasn't yet been threaded
+-- into a triple, still resolve it. This doesn't enable traversal by
+-- itself (the traverser needs edges), but it prevents the premature
+-- "No seeds resolved" failure, and lets the caller detect a density
+-- gap rather than a hard fail.
+SELECT DISTINCT i.seed AS resolved_name
+FROM inputs i
+JOIN discovered_entities de
+    ON lower(de.canonical_text) = lower(i.seed)
+WHERE NOT EXISTS (
+    SELECT 1 FROM canonical_entities ce
+    WHERE lower(ce.canonical_name) = lower(i.seed)
+       OR lower(i.seed) = ANY(SELECT lower(a) FROM UNNEST(ce.aliases) a)
 );
 """
 
@@ -172,7 +193,7 @@ WITH RECURSIVE paths AS (
         ARRAY[COALESCE(mean_confidence, 0.5)::numeric]               AS confs,
         contradiction_load                                           AS contra_load,
         1                                                            AS hops
-    FROM entity_edges
+    FROM entity_edges_extended
     WHERE lower(source_entity_name) = ANY(%(seeds_lower)s)
 
     UNION ALL
@@ -188,7 +209,7 @@ WITH RECURSIVE paths AS (
         p.contra_load + e.contradiction_load,
         p.hops + 1
     FROM paths p
-    JOIN entity_edges e
+    JOIN entity_edges_extended e
         ON lower(e.source_entity_name) = p.path_keys[array_length(p.path_keys, 1)]
     WHERE p.hops < %(max_hops)s
       AND NOT (lower(e.target_entity_name) = ANY(p.path_keys))
