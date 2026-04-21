@@ -22,7 +22,14 @@
 -- is the number of supporting triples and whose mean_confidence is the
 -- average triple confidence.
 
-CREATE OR REPLACE VIEW entity_edges_extended AS
+-- MATERIALIZED so the UNION ALL + GROUP BY isn't re-evaluated at every
+-- recursive-CTE hop during traversal. Refresh after bulk ingest with:
+--   REFRESH MATERIALIZED VIEW entity_edges_extended;
+-- (Can't use CONCURRENTLY yet — some triples share (subject,predicate,
+-- object) but differ on predicate_type/direction, producing duplicate
+-- edge_keys on that group-by shape. If we tighten the group later, we
+-- can add a UNIQUE INDEX and switch to CONCURRENT refresh.)
+CREATE MATERIALIZED VIEW IF NOT EXISTS entity_edges_extended AS
 -- (1) Curated + backbone edges already in entity_edges
 SELECT
   id::text                                          AS edge_key,
@@ -78,16 +85,21 @@ WHERE pct.subject IS NOT NULL
 GROUP BY
   pct.subject, pct.object, pct.predicate, pct.predicate_type, pct.direction;
 
-COMMENT ON VIEW entity_edges_extended IS
+-- Indexes critical for the recursive CTE's join on lower(source/target_entity_name)
+CREATE INDEX IF NOT EXISTS idx_eee_source_lower
+  ON entity_edges_extended (lower(source_entity_name));
+CREATE INDEX IF NOT EXISTS idx_eee_target_lower
+  ON entity_edges_extended (lower(target_entity_name));
+
+COMMENT ON MATERIALIZED VIEW entity_edges_extended IS
   'Unions the curated entity_edges table (backbone + manually-validated edges) '
   'with edges derived from paper_claim_triples (263K+ extracted relations from '
   '17K+ processed papers). Discovery reads from this view so the emergent '
   'connectome is actually traversable. edge_source = ''triple'' marks virtual '
-  'edges; everything else (''backbone'', ''extracted'', etc.) comes from the '
-  'curated table.';
+  'edges; everything else (''backbone'', ''literature'', etc.) comes from the '
+  'curated table. Refresh after bulk ingest with REFRESH MATERIALIZED VIEW.';
 
--- Helper index on paper_claim_triples to keep the view's GROUP BY fast.
--- Case-insensitive since discovery matches on lower(subject/object).
+-- Supporting indexes on paper_claim_triples for when the mview refreshes.
 CREATE INDEX IF NOT EXISTS idx_paper_claim_triples_subject_lower
   ON paper_claim_triples (lower(subject));
 CREATE INDEX IF NOT EXISTS idx_paper_claim_triples_object_lower
