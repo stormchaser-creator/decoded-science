@@ -317,24 +317,37 @@ def structural_synthesize(brief_id: str, frame_runs: list[dict]) -> dict:
 # Narrative synthesizer (Claude)
 # ─────────────────────────────────────────────────────────────────────────
 
-NARRATIVE_SYSTEM = """You are a clinical etiologist writing a "why me" brief
-for a physician. You integrate evidence across ten normally-siloed literatures
-(genomics, developmental biology, aging, immunology, microbiome, etc.) to
-answer why a specific condition may have arisen in a specific patient.
+NARRATIVE_SYSTEM = """You are integrating cross-domain evidence to state the
+mechanism of a pathology's initiation. You are NOT writing a review, a primer,
+or a tumor-board-style summary. You are NOT hedging into uselessness. You are
+not comparing yourself to anyone else.
 
-You are NOT writing a review article. You are writing a clinician-facing brief
-that is:
-  - Honest about uncertainty
-  - Explicit about patient-variable vs baseline factors
-  - Specific about which questions to ask THIS patient and which labs/records
-    would most change the picture
-  - Grounded in the frame data provided — do not fabricate mechanisms the
-    data does not support
-  - Aware that tumor boards already cover diagnosis/treatment — your value is
-    in the etiologic integration they do not produce
+Your job: take the frame data provided — paths grounded in real extracted
+triples — and produce the integrated mechanistic chain that initiates the
+pathology. State the chain declaratively. Make the logical inferential steps
+the frames support. If three frames' paths all implicate a node, that node is
+part of the mechanism — say so, don't hedge it into oblivion.
 
-Use clean markdown. No emojis. Do not overclaim. Prefer the word "contributory"
-over "cause" when the evidence is correlational or multi-factor."""
+Write like a senior researcher who has read across ten fields and is now
+committing to the mechanism. Not a review article. Not a "here are questions."
+An integrated mechanistic account of how this pathology starts.
+
+Hard rules:
+  - NO meta-commentary ("this brief does not cover…", "unlike a tumor board…").
+  - NO fabricated patient details. If patient context was provided, use only
+    what was actually provided; otherwise answer for the pathology generally.
+  - NO "consider asking the patient" sections unless real patient context
+    was given.
+  - NO "further research needed" padding. Either the graph supports an
+    inference or it doesn't. If it does, commit. If it doesn't, cut it.
+  - NO weasel phrases ("may contribute", "could potentially", "is thought to
+    perhaps") stacked together. One hedge per claim is enough; hedges should
+    scale to confidence, not be reflexive.
+  - Do NOT invent mechanisms the paths do not support. But DO make inferential
+    steps that the paths chain together, even if no single paper states the
+    full chain. That integration is the contribution.
+
+Format: clean markdown, declarative sentences, no emojis, no fluff."""
 
 
 def narrative_synthesize(question: str, condition: str | None,
@@ -389,79 +402,85 @@ def narrative_synthesize(question: str, condition: str | None,
 
     pc_text = json.dumps(patient_context or {}, indent=2)
 
-    user_prompt = f"""Write a clinician-facing "Why Me" brief answering:
+    has_patient = bool(patient_context)
+    patient_section = (
+        f"\nPATIENT CONTEXT (use only what is stated; do not invent details):\n{pc_text}\n"
+        if has_patient else
+        "\nNO patient context provided. Answer for the pathology generally — "
+        "do NOT fabricate a patient.\n"
+    )
+
+    user_prompt = f"""Integrate these frame analyses into the mechanistic account of how {condition or 'this pathology'} initiates.
 
 QUESTION: {question}
 CONDITION: {condition or '(not specified)'}
-PATIENT CONTEXT: {pc_text}
-
-You have run {len(frames)} parallel etiologic frame analyses against a
-connectome of {270000}+ edges. Here is the data:
+{patient_section}
+Frames below are parallel Discovery traversals. Each path is grounded in real
+extracted triples from real papers. Your job is to assemble the paths into
+the integrated initiation mechanism.
 
 ---
-## Frame-by-frame outputs
+## Frame outputs
 
 {chr(10).join(frame_summaries)}
 
 ---
 ## Structural synthesis
 
-### Convergent nodes (concepts appearing in ≥3 frames' paths)
+### Convergent nodes (concepts appearing in paths of ≥3 frames)
 {convergent_text}
 
-### Bridge nodes (concepts spanning 2 normally-siloed frames)
+### Bridge nodes (concepts spanning 2 frames)
 {bridge_text}
 
-### Patient-variable factors (convergent/bridge nodes from frames that vary person-to-person)
+### Patient-variable contributory domains (from frames where factors vary person-to-person)
 {pv_text}
 
-### Gaps (frames where substrate is thin — literature may not support this frame)
+### Substrate gaps (frames where the connectome returned few or no paths)
 {gaps_text}
 
 ---
-## Your task
+## What to produce
 
-Write a markdown brief with these sections:
+A markdown brief with exactly these sections and nothing else:
 
-1. **Question and scope** — 1-2 sentences naming the question and what the
-   brief is and is not. (It is not a diagnostic or treatment plan. It is an
-   etiologic integration.)
+### 1. The initiation mechanism (the core — commit to it)
+Write the mechanistic chain. Start from the initiating molecular events, walk
+through cellular consequences, and end at frank pathology. Integrate across
+frames — if germline, aging, and cell-of-origin all route through the same
+node, that node is part of the mechanism; state it directly. The
+inferential step that bridges frame A and frame B is YOUR contribution; the
+literature has the pieces, you assemble. Commit to the chain as stated,
+caveat at the chain level only where genuinely warranted.
 
-2. **What a standard tumor board would already cover** — 1 paragraph
-   acknowledging the genomic, pathologic, and treatment frame the patient
-   already has or will have.
+### 2. Cross-domain inferences the field has not assembled
+For each non-trivial inference your chain makes that individual specialties
+would not make alone, state:
+  - The inference (one sentence, declarative)
+  - The frames whose paths support it
+  - The confidence (high / moderate / speculative) with one-clause reason
+Minimum three inferences if the data supports them. If it doesn't, fewer.
 
-3. **The integrated picture** — the core of the brief. Walk through the
-   convergent attractors and the bridge nodes. Explain the mechanistic
-   chain the graph is implying across frames. Be honest: these are mostly
-   established mechanisms viewed through a new lens, not brand-new findings.
+### 3. Patient-variable factors (ONLY if patient context was provided)
+{'' if has_patient else "  SKIP THIS SECTION — no patient context was given."}
+{'Name the factors that would vary for THIS specific patient (by what they told you), with why and what would confirm or refute. Stick to what the context actually states.' if has_patient else ''}
 
-4. **Patient-variable contributory factors** — list the factors most likely
-   to differ person-to-person and therefore most worth asking about for
-   THIS patient. For each: what it is, why it may contribute, what would
-   confirm or refute it for this patient (a lab, a history question, a
-   family-history probe).
+### 4. Substrate boundaries
+Which frames returned thin or empty results, and what that means for the
+account above. ONE paragraph. No boilerplate "more research needed."
 
-5. **Orderable next steps** — a concrete, prioritized list of questions to
-   ask the patient, labs/records to obtain, and any imaging or genetic
-   testing that would meaningfully change the integrated picture.
+### 5. What this integration adds
+One paragraph, sharp. What does the integration say that no single frame
+would say alone? Not self-praise — a factual statement of the additional
+mechanistic content produced by cross-frame integration.
 
-6. **Gaps and honest uncertainty** — frames where the connectome is too
-   thin to say anything useful, and what that means (either the literature
-   is silent, or we have not yet ingested enough of it — say which).
-
-7. **Citations and evidence trail** — note that the full path evidence
-   appendix is linked separately; do not reproduce it here.
-
-Guidance:
-- Do NOT overclaim. Prefer "contributory" to "cause."
-- Do NOT invent mechanisms the frame data does not support.
-- Do NOT turn this into a review article — it is a clinical brief.
-- Be specific. "Chronic inflammation" is less useful than "chronic
-  inflammation, specifically the IL-6/TNF-α axis that frame X and frame Y
-  both converged on."
-- Write as if the reader is a physician colleague, not a patient or a
-  grant reviewer."""
+Rules (repeating because they're the point):
+- No meta sections.
+- No "what a tumor board covers."
+- No invented patient details.
+- No reflexive hedges. Commit where the graph commits.
+- Declarative prose. Active voice. Senior researcher tone, not clinician-
+  friendly primer tone."""
 
     client = Anthropic()
     msg = client.messages.create(
