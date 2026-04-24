@@ -45,10 +45,21 @@ DB_NAME = os.environ.get("PGDATABASE", "encoded_human")
 
 
 def db_connect():
-    return psycopg2.connect(
+    """Discovery sessions issue recursive CTEs over the 270K+ row extended
+    edge view. Default work_mem (4MB) forces massive tmp-disk spills on
+    dense-seed frames (aging, microbiome) — previously failed with
+    'No space left on device' despite ample free disk. Allocating 4 GB
+    work_mem keeps the recursion in RAM; setting temp_file_limit = -1
+    removes any tmp-file cap. Mac Mini has the RAM; use it."""
+    conn = psycopg2.connect(
         host=DB_HOST, dbname=DB_NAME,
         cursor_factory=psycopg2.extras.RealDictCursor,
     )
+    with conn.cursor() as cur:
+        cur.execute("SET work_mem = '4GB'")
+        cur.execute("SET temp_file_limit = -1")
+    conn.commit()
+    return conn
 
 
 # ============================================================================
